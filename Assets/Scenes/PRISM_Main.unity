@@ -436,6 +436,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1200915370}
   - component: {fileID: 1200915369}
+  - component: {fileID: 1200915371}
   m_Layer: 0
   m_Name: AudioManager
   m_TagString: Untagged
@@ -455,7 +456,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 15fd5fc2c97bd7b4eb1fa4ee71ea2060, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  testClip: {fileID: 8300000, guid: 4671c2fdce8f90742bd5e3d9ac2cffa5, type: 3}
+  useDynamicPath: 1
+  inspectorClip: {fileID: 8300000, guid: 4671c2fdce8f90742bd5e3d9ac2cffa5, type: 3}
+  filePath: C:\Users\ethan\Downloads\Ghost.mp3
 --- !u!4 &1200915370
 Transform:
   m_ObjectHideFlags: 0
@@ -471,6 +474,18 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1200915371
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1200915368}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 17f0790770a71964b99aa665c7f235ba, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

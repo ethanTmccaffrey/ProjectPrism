@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using UnityEditor.Rendering.Universal;
+using UnityEngine;
 
 public class AudioAnalyser : MonoBehaviour
 {
@@ -10,6 +11,74 @@ public class AudioAnalyser : MonoBehaviour
     public float PeakEnergy { get; private set; }
     public float AverageEnergy { get; private set; }
     public float EstimatedTempo {  get; private set; }
+    public float LowFrequencyEnergy { get; private set; }
+    public float MidFrequencyEnergy {get; private set; }
+    public float HighFrequencyEnergy { get; private set; }
+    public float PitchRegister {  get; private set; } //0 = very low, 1 = very high//
+
+    private AudioSource _audioSource;
+    private bool _spectrumAnalysisComplete = false;
+    private int _spectrumSampleCount = 0;
+    private const int SPECTRUM_SAMPLES = 50; //Sample 50 frams then average//
+    private float[] _lowAccum = new float[1];
+    private float[] _midAccum = new float[1];
+    private float[] _highAccum = new float[1];
+    private const int FFT_SIZE = 1024;
+
+    private float _startDelay = 1f; // Wait half a second before sampling//
+    private float _timer = 0f;
+
+    public void Init(AudioSource source)
+    {
+        _audioSource = source;
+    }
+
+    void Update()
+    {
+        if (_audioSource == null || _spectrumAnalysisComplete) return;
+        if(!_audioSource.isPlaying) return;
+
+        //Wait for audio to properly start before sampling//
+        _timer += Time.deltaTime;
+        if (_timer < _startDelay) return;
+
+        float[] spectrum = new float[FFT_SIZE];
+        _audioSource.GetSpectrumData(spectrum, 0, FFTWindow.BlackmanHarris);
+
+        //Split spectrum into three bands//
+        //Low: bins 0-10 (~10~500Hz)//
+        //Mid: bins 10-100 (~500~4.5kHz)//
+        //High: bins 100-512 (~4.5kHz~24kHz)//
+        float low = 0f, mid = 0f, high = 0f;
+
+        for (int i = 0; i < 10; i++) low += spectrum[i];
+        for (int i = 10; i < 100; i++) mid += spectrum[i];
+        for (int i = 100; i < FFT_SIZE / 2; i++) high += spectrum[i];
+
+        _lowAccum[0] += low / 10f;
+        _midAccum[0] += mid / 90f;
+        _highAccum[0] += high / 412f;
+
+        _spectrumSampleCount++;
+
+        if(_spectrumSampleCount >= SPECTRUM_SAMPLES)
+        {
+            LowFrequencyEnergy = _lowAccum[0] / SPECTRUM_SAMPLES;
+            MidFrequencyEnergy = _midAccum[0] / SPECTRUM_SAMPLES;
+            HighFrequencyEnergy = _highAccum[0] / SPECTRUM_SAMPLES;
+
+            //Calculate the pitch register as a 0-1 value//
+            //0 = all energy in low frequencies, 1 = all energy in high//
+            float total = LowFrequencyEnergy + MidFrequencyEnergy + HighFrequencyEnergy;
+            if(total > 0)
+            {
+                PitchRegister = (MidFrequencyEnergy + HighFrequencyEnergy * 2f) / (total + HighFrequencyEnergy);
+            }
+
+            _spectrumAnalysisComplete = true;
+            LogFrequencyResults();
+        }
+    }
 
     public void Analyse(AudioClip clip)
     {
@@ -182,5 +251,14 @@ public class AudioAnalyser : MonoBehaviour
         Debug.Log(energyMap);
 
        
+    }
+
+    private void LogFrequencyResults()
+    {
+        Debug.Log("=== PRSIM Frequency Analysis ===");
+        Debug.Log("Low Frequency Energy: " + LowFrequencyEnergy.ToString("F6"));
+        Debug.Log("Mid Frequency Energy: " + MidFrequencyEnergy.ToString("F6"));
+        Debug.Log("High Frequency Energy: " + HighFrequencyEnergy.ToString("F6"));
+        Debug.Log("Pitch Register (0=Low, 1=High): " + PitchRegister.ToString("F3"));
     }
 }

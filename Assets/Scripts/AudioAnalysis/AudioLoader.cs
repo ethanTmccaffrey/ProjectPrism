@@ -78,6 +78,7 @@ public class AudioLoader : MonoBehaviour
         AudioAnalyser analyser = GetComponent<AudioAnalyser>();
         if(analyser != null)
         {
+            analyser.Init(audioSource);
             analyser.Analyse(loadedClip);
         }
     }
