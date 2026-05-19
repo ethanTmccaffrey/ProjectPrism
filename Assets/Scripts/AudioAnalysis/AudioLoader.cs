@@ -76,13 +76,19 @@ public class AudioLoader : MonoBehaviour
 
         //Hand over to analyser//
         AudioAnalyser analyser = GetComponent<AudioAnalyser>();
-        if(analyser != null)
+        if (analyser != null)
         {
             analyser.Init(audioSource);
             analyser.Analyse(loadedClip);
         }
-    }
 
+        SpatialGenerator generator = GetComponent<SpatialGenerator>();
+        if (generator != null)
+        {
+            generator.Generate(analyser);
+        }
+
+    }
     void ReadBasicAudioData(AudioClip clip)
     {
         Debug.Log("=== PRISM Audio Analysis ===");

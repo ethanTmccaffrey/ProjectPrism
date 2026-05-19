@@ -168,7 +168,7 @@ public class AudioAnalyser : MonoBehaviour
             fineEnergy[i] = Mathf.Max(0f, diff); //Only positive changes//
         }
 
-        //Step 2: Auto correction//
+        //Step 2: Auto correlation//
         //Looking for lags (delays) that correspond to BPM range 60-200//
         //Convert BPM range to segment lag range//
         //At 10ms per segment: 60 BPM = beat every 1000ms = 100 segments, 200 BPM = beat every 300ms = 30 segments//

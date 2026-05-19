@@ -205,13 +205,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1, z: -10}
+  m_LocalRotation: {x: 0.27781588, y: 0.36497167, z: -0.1150751, w: 0.8811196}
+  m_LocalPosition: {x: -20, y: 45, z: -20}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 35, y: 45, z: 0}
 --- !u!114 &330585547
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -437,6 +437,7 @@ GameObject:
   - component: {fileID: 1200915370}
   - component: {fileID: 1200915369}
   - component: {fileID: 1200915371}
+  - component: {fileID: 1200915372}
   m_Layer: 0
   m_Name: AudioManager
   m_TagString: Untagged
@@ -457,7 +458,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   useDynamicPath: 1
-  inspectorClip: {fileID: 8300000, guid: 4671c2fdce8f90742bd5e3d9ac2cffa5, type: 3}
+  inspectorClip: {fileID: 8300000, guid: a8a8f9e7fba26864f899d173bbd051ec, type: 3}
   filePath: C:\Users\ethan\Downloads\Ghost.mp3
 --- !u!4 &1200915370
 Transform:
@@ -486,6 +487,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 17f0790770a71964b99aa665c7f235ba, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!114 &1200915372
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1200915368}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abfc5242d2f86b743847b56ffef4455d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  mode: 0
+  gridSize: 64
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
