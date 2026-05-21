@@ -3,7 +3,7 @@ using UnityEngine;
 public class SpatialGenerator : MonoBehaviour
 {
     //Mode//
-    public enum GenerationMode { Landscape, Abstract}
+    public enum GenerationMode { Landscape, Abstract }
     public enum GridSize { Small = 64, Medium = 128, Large = 256 }
 
     [Header("Generation Settings")]
@@ -54,10 +54,9 @@ public class SpatialGenerator : MonoBehaviour
         float spacingMultiplier = Mathf.Lerp(2f, 0.8f, Mathf.InverseLerp(60f, 180f, bpm));
 
         //Colour Palette from frequency balance//
-        Color lowColour = GetLowFrequencyColour();
-        Color highColour = GetHighFrequencyColour();
+        Color shapeColour = GetTrackColour();
 
-        for(int segment = 0; segment < energyMap.Length; segment++)
+        for (int segment = 0; segment < energyMap.Length; segment++)
         {
             float normalizedEnergy = energyMap[segment] / peakEnergy;
 
@@ -68,14 +67,11 @@ public class SpatialGenerator : MonoBehaviour
             //Low energy = cube, mid = sphere, high = pyramid//
             PrimitiveType shapeType = GetShapeFromEnergy(normalizedEnergy);
 
-            //Colour interpolated between low and high frequency colours//
-            Color shapeColour = Color.Lerp(lowColour, highColour, _analyser.PitchRegister);
-
-            for(int col = 0; col < columnsPerSegment; col++)
+            for (int col = 0; col < columnsPerSegment; col++)
             {
                 int x = segment * columnsPerSegment + col;
 
-                for(int z = 0; z < size; z += 2)
+                for (int z = 0; z < size; z += 2)
                 {
                     //Add variation so it doesnt look perfectly uniform//
                     float heightVariation = Random.Range(0.8f, 1.2f);
@@ -83,7 +79,7 @@ public class SpatialGenerator : MonoBehaviour
 
                     Vector3 position = shapeType == PrimitiveType.Sphere ? new Vector3(x * 2f, finalHeight, z * 2f) : new Vector3(x * 2f, finalHeight / 2f, z * 2f);
 
-                    PlaceShape(shapeType, position, shapeType == PrimitiveType.Sphere ? new Vector3(BASE_UNIT * 1.8f, BASE_UNIT * 1.8f, BASE_UNIT * 1.8f): new Vector3(BASE_UNIT * 1.8f, finalHeight, BASE_UNIT * 1.8f),shapeColour);
+                    PlaceShape(shapeType, position, shapeType == PrimitiveType.Sphere ? new Vector3(BASE_UNIT * 1.8f, BASE_UNIT * 1.8f, BASE_UNIT * 1.8f) : new Vector3(BASE_UNIT * 1.8f, finalHeight, BASE_UNIT * 1.8f), shapeColour);
                 }
             }
         }
@@ -105,7 +101,7 @@ public class SpatialGenerator : MonoBehaviour
 
         //Apply colour via material//
         Renderer renderer = obj.GetComponent<Renderer>();
-        if(renderer != null)
+        if (renderer != null)
         {
             renderer.material.color = colour;
         }
@@ -115,23 +111,36 @@ public class SpatialGenerator : MonoBehaviour
         if (col != null) Destroy(col);
     }
 
-    private Color GetLowFrequencyColour()
+    private Color GetTrackColour()
     {
-        //Low frequency = warm dark colours (deep reds, dark oranges)//
-        return new Color(
-           Mathf.Lerp(0.3f, 0.7f, _analyser.LowFrequencyEnergy * 10f),
-           Mathf.Lerp(0.1f, 0.3f, _analyser.LowFrequencyEnergy * 10f),
-           Mathf.Lerp(0.1f, 0.2f, _analyser.LowFrequencyEnergy * 10f)
-           );
-    }
+        float pitch = _analyser.PitchRegister; //0 = low/warm, 1 = high/cool//
+        float energy = _analyser.AverageEnergy / _analyser.PeakEnergy;
 
-    private Color GetHighFrequencyColour()
-    {
-        //High frequency = cool bright colours (blues, whites , cyans)//
-        return new Color(
-           Mathf.Lerp(0.2f, 0.6f, _analyser.HighFrequencyEnergy * 100f),
-           Mathf.Lerp(0.4f, 0.8f, _analyser.HighFrequencyEnergy * 100f),
-           Mathf.Lerp(0.6f, 1.0f, _analyser.HighFrequencyEnergy * 100f)
-           );
+        float remappedPitch = Mathf.InverseLerp(0.08f, 0.45f, pitch);
+
+        //Define anchor colours for the gradient//
+        Color warmColour = new Color(0.8f, 0.1f, 0.05f);
+        Color midColour = new Color(0.5f, 0.1f, 0.7f);
+        Color coolColour = new Color(0.05f, 0.5f, 0.9f);
+
+        Color baseColour;
+        if (remappedPitch < 0.5f)
+        {
+            baseColour = Color.Lerp(warmColour, midColour, pitch * 2f);
+        }
+        else
+        {
+            baseColour = Color.Lerp(midColour, coolColour, (pitch - 0.05f) * 2f);
+        }
+
+        //Energy drives brightness - louder tracks are more vivid//
+        float brightness = Mathf.Lerp(0.6f, 1.0f, energy);
+        float r = baseColour.r * brightness;
+        float g = baseColour.g * brightness;
+        float b = baseColour.b * brightness;
+
+        Debug.Log($"Pitch: {pitch} | Remapped: {remappedPitch} | R:{r:F3} G:{g:F3} B:{b:F3}");
+
+        return new Color(r, g, b);
     }
 }

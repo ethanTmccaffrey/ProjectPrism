@@ -82,11 +82,9 @@ public class AudioLoader : MonoBehaviour
             analyser.Analyse(loadedClip);
         }
 
-        SpatialGenerator generator = GetComponent<SpatialGenerator>();
-        if (generator != null)
-        {
-            generator.Generate(analyser);
-        }
+        
+        StartCoroutine(WaitForAnalysisThenGenerate(analyser));
+        
 
     }
     void ReadBasicAudioData(AudioClip clip)
@@ -97,6 +95,21 @@ public class AudioLoader : MonoBehaviour
         Debug.Log("Sample Rate: " + clip.frequency + " Hz");
         Debug.Log("Channels: " + clip.channels);
         Debug.Log("Total Samples: " + clip.samples);
+    }
+
+    private System.Collections.IEnumerator WaitForAnalysisThenGenerate(AudioAnalyser analyser)
+    {
+        //Wait until spectrum analysis is complete//
+        while(!analyser.AnalysisComplete)
+        {
+            yield return null;
+        }
+
+        SpatialGenerator generator = GetComponent<SpatialGenerator>();
+        if (generator != null)
+        {
+            generator.Generate(analyser);
+        }
     }
 
     public AudioClip GetLoadedClip() => loadedClip;

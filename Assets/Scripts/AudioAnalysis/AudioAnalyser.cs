@@ -28,6 +28,8 @@ public class AudioAnalyser : MonoBehaviour
     private float _startDelay = 1f; // Wait half a second before sampling//
     private float _timer = 0f;
 
+    public bool AnalysisComplete { get; private set; } = false;
+
     public void Init(AudioSource source)
     {
         _audioSource = source;
@@ -260,5 +262,6 @@ public class AudioAnalyser : MonoBehaviour
         Debug.Log("Mid Frequency Energy: " + MidFrequencyEnergy.ToString("F6"));
         Debug.Log("High Frequency Energy: " + HighFrequencyEnergy.ToString("F6"));
         Debug.Log("Pitch Register (0=Low, 1=High): " + PitchRegister.ToString("F3"));
+        AnalysisComplete = true;
     }
 }

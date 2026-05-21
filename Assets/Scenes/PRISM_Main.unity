@@ -457,7 +457,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 15fd5fc2c97bd7b4eb1fa4ee71ea2060, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  useDynamicPath: 1
+  useDynamicPath: 0
   inspectorClip: {fileID: 8300000, guid: a8a8f9e7fba26864f899d173bbd051ec, type: 3}
   filePath: C:\Users\ethan\Downloads\Ghost.mp3
 --- !u!4 &1200915370
