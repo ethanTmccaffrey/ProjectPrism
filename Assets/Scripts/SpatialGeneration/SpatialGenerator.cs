@@ -4,11 +4,13 @@ public class SpatialGenerator : MonoBehaviour
 {
     //Mode//
     public enum GenerationMode { Landscape, Abstract }
+    public enum LandscapeShape { Square, Circle, Diamond, Cross}
     public enum GridSize { Small = 64, Medium = 128, Large = 256 }
 
     [Header("Generation Settings")]
     [SerializeField] private GenerationMode mode = GenerationMode.Landscape;
     [SerializeField] private GridSize gridSize = GridSize.Small;
+    [SerializeField] private LandscapeShape landscapeShape = LandscapeShape.Square;
 
     //Internal//
     private AudioAnalyser _analyser;
@@ -74,6 +76,9 @@ public class SpatialGenerator : MonoBehaviour
 
                 for (int z = 0; z < size; z += 2)
                 {
+                    //Skip positions outside the choen shape//
+                    if (!IsInsideShape(x, z, size)) continue;
+
                     //Add variation so it doesnt look perfectly uniform//
                     float heightVariation = Random.Range(0.8f, 1.2f);
                     float finalHeight = terrainHeight * heightVariation;
@@ -140,5 +145,33 @@ public class SpatialGenerator : MonoBehaviour
         //Normalise birghtness so no channel dominance makes it too dark//
         float brightness = Mathf.Lerp(0.5f, 1.0f, _analyser.EnergyOverTime[segment] / _analyser.PeakEnergy);
         return blended * brightness;
+    }
+
+    private bool IsInsideShape(int x, int z, int size)
+    {
+        //Normalise x and z to -1 to 1 range relative to grid centre//
+        float nx = (x / (float)size) * 2f - 1f;
+        float nz = (z / (float)size) * 2f - 1f;
+
+        switch(landscapeShape)
+        {
+            case LandscapeShape.Square:
+                //All positions valid//
+                return true;
+            case LandscapeShape.Circle:
+                //Inside unit circle//
+                return (nx * nx + nz * nz) <= 1f;
+
+            case LandscapeShape.Diamond:
+                //Inside diamond = absolute values sum to less than 1//
+                return (Mathf.Abs(nx) + Mathf.Abs(nz)) <= 1f;
+
+            case LandscapeShape.Cross:
+                //Inside Cross = either x or z is within the centre third//
+                return Mathf.Abs(nx) <= 0.33f || Mathf.Abs(nz) <= 0.33f;
+
+            default:
+                return true;
+        }
     }
 }
