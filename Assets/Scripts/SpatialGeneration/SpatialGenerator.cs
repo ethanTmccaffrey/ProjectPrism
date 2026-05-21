@@ -53,8 +53,6 @@ public class SpatialGenerator : MonoBehaviour
         //BPM drives objects spacing - Faster = Denser//
         float spacingMultiplier = Mathf.Lerp(2f, 0.8f, Mathf.InverseLerp(60f, 180f, bpm));
 
-        //Colour Palette from frequency balance//
-        Color shapeColour = GetTrackColour();
 
         for (int segment = 0; segment < energyMap.Length; segment++)
         {
@@ -62,6 +60,9 @@ public class SpatialGenerator : MonoBehaviour
 
             //Height driven by energy//
             float terrainHeight = Mathf.Lerp(2f, 12f, normalizedEnergy);
+
+            //Each segment now gets its own colour//
+            Color shapeColour = GetSegmentColour(segment);
 
             //Shape type driven by energy level//
             //Low energy = cube, mid = sphere, high = pyramid//
@@ -111,36 +112,33 @@ public class SpatialGenerator : MonoBehaviour
         if (col != null) Destroy(col);
     }
 
-    private Color GetTrackColour()
+    private Color GetSegmentColour(int segment)
     {
-        float pitch = _analyser.PitchRegister; //0 = low/warm, 1 = high/cool//
-        float energy = _analyser.AverageEnergy / _analyser.PeakEnergy;
+        float low = _analyser.LowEnergyOverTime[segment];
+        float mid = _analyser.MidEnergyOverTime[segment];
+        float high = _analyser.HighEnergyOverTime[segment];
 
-        float remappedPitch = Mathf.InverseLerp(0.08f, 0.45f, pitch);
+        float total = low + mid + high;
+        if (total == 0) return Color.grey;
 
-        //Define anchor colours for the gradient//
-        Color warmColour = new Color(0.8f, 0.1f, 0.05f);
-        Color midColour = new Color(0.5f, 0.1f, 0.7f);
-        Color coolColour = new Color(0.05f, 0.5f, 0.9f);
+        //Normalise each band as proportion of this segment's total energy//
+        float lowRatio = low / total;
+        float midRatio = mid / total;
+        float highRatio = high / total;
 
-        Color baseColour;
-        if (remappedPitch < 0.5f)
-        {
-            baseColour = Color.Lerp(warmColour, midColour, pitch * 2f);
-        }
-        else
-        {
-            baseColour = Color.Lerp(midColour, coolColour, (pitch - 0.05f) * 2f);
-        }
+        //Low -> warm red/organge//
+        //Mid -> green/yellow//
+        //High -> blue/Cyan//
+        //These blend together based on which bands are dominant//
+        Color lowColour = new Color(0.9f, 0.15f, 0.05f); //Warm Red//
+        Color midColour = new Color(0.2f, 0.8f, 0.2f); //Green//
+        Color highColour = new Color(0.05f, 0.4f, 0.95f); //Bright blue//
 
-        //Energy drives brightness - louder tracks are more vivid//
-        float brightness = Mathf.Lerp(0.6f, 1.0f, energy);
-        float r = baseColour.r * brightness;
-        float g = baseColour.g * brightness;
-        float b = baseColour.b * brightness;
+        //Weighted blend of all three colours by their ratios//
+        Color blended = lowColour * lowRatio + midColour * midRatio + highColour * highRatio;
 
-        Debug.Log($"Pitch: {pitch} | Remapped: {remappedPitch} | R:{r:F3} G:{g:F3} B:{b:F3}");
-
-        return new Color(r, g, b);
+        //Normalise birghtness so no channel dominance makes it too dark//
+        float brightness = Mathf.Lerp(0.5f, 1.0f, _analyser.EnergyOverTime[segment] / _analyser.PeakEnergy);
+        return blended * brightness;
     }
 }

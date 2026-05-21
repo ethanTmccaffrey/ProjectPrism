@@ -29,6 +29,10 @@ public class AudioAnalyser : MonoBehaviour
     private float _timer = 0f;
 
     public bool AnalysisComplete { get; private set; } = false;
+    public float[] LowEnergyOverTime { get; private set; }
+    public float[] MidEnergyOverTime { get; private set; }
+    public float[] HighEnergyOverTime { get; private set; }
+
 
     public void Init(AudioSource source)
     {
@@ -106,29 +110,56 @@ public class AudioAnalyser : MonoBehaviour
     private float[] CalculateEnergyOverTime(float[] samples, AudioClip clip)
     {
         float[] energy = new float[SEGMENTS];
+        LowEnergyOverTime = new float[SEGMENTS];
+        MidEnergyOverTime = new float[SEGMENTS];
+        HighEnergyOverTime = new float[SEGMENTS];
+
         int samplesPerSegment = samples.Length / SEGMENTS;
+
+        //Frequency bin boundaries based on sample rate//
+        //These approximate low/mid/high frequency ranges//
+        int samplesPerSecond = clip.frequency * clip.channels;
+        int lowCutoff = samplesPerSecond / 8; //Bottom 12.5% of segment = low frequency//
+        int midCutoff = samplesPerSecond / 2; //12.5% to 50% = Mid frequency//
+        //high = 50% to 100% of segment//
 
         float peak = 0f;
         float total = 0f;
 
         for(int i = 0; i < SEGMENTS; i++)
         {
-            float sum = 0f;
+            float sumAll = 0f;
+            float sumLow = 0f;
+            float sumMid = 0f;
+            float sumHigh = 0f;
+
             int start = i * samplesPerSegment;
             int end = Mathf.Min(start + samplesPerSegment, samples.Length);
+            int segLength = end - start;
 
-            for (int j = start; j < end; j++)
+            for(int j = start; j < end; j++)
             {
-                sum += samples[j] * samples[j];
+                float squared = samples[j] * samples[j];
+                sumAll += squared;
+
+                //Classify samples position within segment as low/mid/high//
+                int localIndex = j - start;
+                if(localIndex < lowCutoff) sumLow += squared;
+                else if(localIndex < midCutoff) sumMid += squared;
+                else sumHigh += squared;
             }
 
-            float rms = Mathf.Sqrt(sum / (end - start));
+            float rms = Mathf.Sqrt(sumAll / segLength);
             energy[i] = rms;
 
-            if(rms > peak) peak = rms;
+            //Normalise each band by its sample count//
+            LowEnergyOverTime[i] = Mathf.Sqrt(sumLow / Mathf.Max(1, lowCutoff));
+            MidEnergyOverTime[i] = Mathf.Sqrt(sumMid / Mathf.Max(1, midCutoff - lowCutoff));
+            HighEnergyOverTime[i] = Mathf.Sqrt(sumHigh / Mathf.Max(1, segLength - midCutoff));
+
+            if (rms > peak) peak = rms;
             total += rms;
         }
-
         PeakEnergy = peak;
         AverageEnergy = total / SEGMENTS;
 
