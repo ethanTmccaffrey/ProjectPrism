@@ -115,55 +115,81 @@ public class AudioAnalyser : MonoBehaviour
         HighEnergyOverTime = new float[SEGMENTS];
 
         int samplesPerSegment = samples.Length / SEGMENTS;
-
-        //Frequency bin boundaries based on sample rate//
-        //These approximate low/mid/high frequency ranges//
-        int samplesPerSecond = clip.frequency * clip.channels;
-        int lowCutoff = samplesPerSecond / 8; //Bottom 12.5% of segment = low frequency//
-        int midCutoff = samplesPerSecond / 2; //12.5% to 50% = Mid frequency//
-        //high = 50% to 100% of segment//
+        int channels = clip.channels;
+        int sampleRate = clip.frequency;
 
         float peak = 0f;
         float total = 0f;
 
         for(int i = 0; i < SEGMENTS; i++)
         {
-            float sumAll = 0f;
-            float sumLow = 0f;
-            float sumMid = 0f;
-            float sumHigh = 0f;
-
             int start = i * samplesPerSegment;
             int end = Mathf.Min(start + samplesPerSegment, samples.Length);
             int segLength = end - start;
 
-            for(int j = start; j < end; j++)
+            //Calculate RMS energy overall energy//
+            float sumAll = 0f;
+            for(int j = start; j < end; ++j)
             {
-                float squared = samples[j] * samples[j];
-                sumAll += squared;
-
-                //Classify samples position within segment as low/mid/high//
-                int localIndex = j - start;
-                if(localIndex < lowCutoff) sumLow += squared;
-                else if(localIndex < midCutoff) sumMid += squared;
-                else sumHigh += squared;
+               sumAll += samples[j] * samples[j];
             }
 
             float rms = Mathf.Sqrt(sumAll / segLength);
             energy[i] = rms;
 
-            //Normalise each band by its sample count//
-            LowEnergyOverTime[i] = Mathf.Sqrt(sumLow / Mathf.Max(1, lowCutoff));
-            MidEnergyOverTime[i] = Mathf.Sqrt(sumMid / Mathf.Max(1, midCutoff - lowCutoff));
-            HighEnergyOverTime[i] = Mathf.Sqrt(sumHigh / Mathf.Max(1, segLength - midCutoff));
+            //FFT to get frequency content//
+            //use next power of 2 up to 4096 for accuracy//
+            int fftSize = 4096;
+            float[] fftInput = new float[fftSize];
+
+            //Copy segment samples into FFT buffer (mono mix if stereo)//
+            for(int j = 0; j < fftSize; j++)
+            {
+                int sampleIndex = start + (j * channels);
+                if(sampleIndex < samples.Length) fftInput[j] = samples[sampleIndex];
+            }
+
+            //Apply Hanning window to reduce spectural leakage//
+            for (int j = 0; j < fftSize; j++)
+            {
+                float window = 0.5f * (1f - Mathf.Cos(2f * Mathf.PI * j / (fftSize - 1)));
+                fftInput[j] *= window;
+            }
+
+            float[] spectrum = FFT(fftInput);
+
+            //Frequency resolution = sampleRate / fftSize//
+            float freqResolution = (float)sampleRate / fftSize;
+
+            //Band boundaies in Hz//
+            //Low: 20-250Hz//
+            //Mid: 250-4000Hz//
+            //High: 4000-20000Hz//
+            int lowMaxBin = Mathf.RoundToInt(250f /  freqResolution);
+            int midMaxBin = Mathf.RoundToInt(4000f / freqResolution);
+            int highMaxBin = Mathf.RoundToInt(20000f / freqResolution);
+            highMaxBin = Mathf.Min(highMaxBin, spectrum.Length - 1);
+
+            float sumLow = 0f, sumMid = 0f, sumHigh = 0f;
+
+            for(int b = 1; b < lowMaxBin; b++) sumLow += spectrum[b];
+            for(int b = lowMaxBin; b < midMaxBin; b++) sumMid += spectrum[b];
+            for (int b = midMaxBin; b < highMaxBin; b++) sumHigh += spectrum[b];
+
+            //Normalise by bin count//
+            LowEnergyOverTime[i] = (sumLow / Mathf.Max(1, lowMaxBin - 1) * 3.5f);
+            MidEnergyOverTime[i] = (sumMid / Mathf.Max(1, midMaxBin - lowMaxBin) * 1.0f);
+            HighEnergyOverTime[i] = (sumHigh / Mathf.Max(1, highMaxBin - midMaxBin) * 8.0f);
 
             if (rms > peak) peak = rms;
             total += rms;
         }
+
         PeakEnergy = peak;
         AverageEnergy = total / SEGMENTS;
 
         return energy;
+
     }
 
     //Basic tempo estimation from energy peaks//
@@ -262,6 +288,59 @@ public class AudioAnalyser : MonoBehaviour
         float bpm = 60000f / periodMs;
 
         return bpm;
+    }
+
+    private float[] FFT(float[] input)
+    {
+        int n = input.Length;
+        float[] real = new float[n];
+        float[] imag = new float[n];
+        float[] output = new float[n];
+
+        for(int i = 0; i < n; i++) real[i] = input[i];
+
+        //Cooley-Tukey iterative FFT//
+        int j = 0;
+        for(int i = 1; i < n; i++)
+        {
+            int bit = n >> 1;
+            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if(i < j) { float tmp = real[i]; real[i] = real[j]; real[j] = tmp; }
+        }
+
+        for(int len = 2; len <= n; len <<=1)
+        {
+            float angle = -2f * Mathf.PI / len;
+            float wRe = Mathf.Cos(angle);
+            float wIm = Mathf.Sin(angle);
+
+            for(int i = 0; i < n; i += len)
+            {
+                float curRe = 1f, curIm = 0f;
+                for(int k = 0; k < len / 2; k++)
+                {
+                    float uRe = real[i + k];
+                    float uIm = imag[i + k];
+                    float vRe = real[i + k + len / 2] * curRe - imag[i + k + len / 2] * curIm;
+                    float vIm = real[i + k + len / 2] * curIm + imag[i + k + len / 2] * curRe;
+
+                    real[i + k] = uRe + vRe;
+                    imag[i + k] = uIm + vIm;
+                    real[i + k + len / 2] = uRe - vRe;
+                    imag[i + k + len / 2] = uIm - vIm;
+
+                    float newCurRe = curRe * wRe - curIm * wIm;
+                    curIm = curRe * wIm + curIm * wRe;
+                    curRe = newCurRe;
+                }
+            }
+        }
+
+        //Return magnitude specturm//
+        for (int i = 0; i < n / 2; i++) output[i] = Mathf.Sqrt(real[i] * real[i] + imag[i] * imag[i]);
+
+        return output;
     }
 
     private void LogResults()

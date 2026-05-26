@@ -1,9 +1,10 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public class SpatialGenerator : MonoBehaviour
 {
     //Mode//
-    public enum GenerationMode { Landscape, Abstract }
+    public enum GenerationMode { Landscape, Abstract, Organic }
     public enum LandscapeShape { Square, Circle, Diamond, Cross}
     public enum GridSize { Small = 64, Medium = 128, Large = 256 }
 
@@ -15,10 +16,16 @@ public class SpatialGenerator : MonoBehaviour
     //Internal//
     private AudioAnalyser _analyser;
     private GameObject _generatedEnvironment;
+    private OrganicGenerator _organicGenerator;
 
     //Primitive prefab references//
     private const float BASE_UNIT = 1f;
 
+    private void Awake()
+    {
+        _organicGenerator = GetComponent<OrganicGenerator>();
+        if (_organicGenerator == null) _organicGenerator = gameObject.AddComponent<OrganicGenerator>();
+    }
     public void Generate(AudioAnalyser analyser)
     {
         _analyser = analyser;
@@ -32,6 +39,9 @@ public class SpatialGenerator : MonoBehaviour
         {
             case GenerationMode.Landscape:
                 GenerateLandscape();
+                break;
+            case GenerationMode.Organic:
+                _organicGenerator.Generate(analyser, _generatedEnvironment);
                 break;
             case GenerationMode.Abstract:
                 //Phase 3//
@@ -91,33 +101,39 @@ public class SpatialGenerator : MonoBehaviour
         }
     }
 
-    private PrimitiveType GetShapeFromEnergy(float normalizedEnergy)
+    
+    public static GameObject CreatePrimitiveChild(PrimitiveType type, GameObject parent)
     {
-        if (normalizedEnergy < 0.4f) return PrimitiveType.Cube;
-        if (normalizedEnergy < 0.7f) return PrimitiveType.Sphere;
-        return PrimitiveType.Cylinder; //Unity doesnt have a pyramid primitive//
+        GameObject obj = GameObject.CreatePrimitive(type);
+        obj.transform.SetParent(parent.transform);
+        Collider col = obj.GetComponent<Collider>();
+        if (col != null) Destroy(col);
+        return obj;
+    }
+
+    public static void ApplyColour(GameObject obj, Color colour)
+    {
+        Renderer renderer = obj.GetComponent<Renderer>();
+        if (renderer != null) renderer.material.color = colour;
     }
 
     private void PlaceShape(PrimitiveType type, Vector3 position, Vector3 scale, Color colour)
     {
         GameObject obj = GameObject.CreatePrimitive(type);
-        obj.transform.SetParent(_generatedEnvironment.transform);
         obj.transform.position = position;
         obj.transform.localScale = scale;
-
-        //Apply colour via material//
-        Renderer renderer = obj.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            renderer.material.color = colour;
-        }
-
-        //Remove collider for now//
-        Collider col = obj.GetComponent<Collider>();
-        if (col != null) Destroy(col);
+        ApplyColour(obj, colour);
     }
 
-    private Color GetSegmentColour(int segment)
+    private void PlaceShapeWithRotation(PrimitiveType type, Vector3 position, Vector3 scale, Color colour, Quaternion rotation)
+    {
+        GameObject obj = CreatePrimitiveChild(type, _generatedEnvironment);
+        obj.transform.rotation = rotation;
+        obj.transform.localScale = scale;
+        obj.transform.position = position;
+        ApplyColour(obj, colour);
+    }
+    public Color GetSegmentColour(int segment)
     {
         float low = _analyser.LowEnergyOverTime[segment];
         float mid = _analyser.MidEnergyOverTime[segment];
@@ -131,20 +147,27 @@ public class SpatialGenerator : MonoBehaviour
         float midRatio = mid / total;
         float highRatio = high / total;
 
-        //Low -> warm red/organge//
-        //Mid -> green/yellow//
-        //High -> blue/Cyan//
-        //These blend together based on which bands are dominant//
-        Color lowColour = new Color(0.9f, 0.15f, 0.05f); //Warm Red//
-        Color midColour = new Color(0.2f, 0.8f, 0.2f); //Green//
-        Color highColour = new Color(0.05f, 0.4f, 0.95f); //Bright blue//
+        //Map frequency balance directly to hue//
+        //Low = warm (0-60 degrees)//
+        //Mid = green (90-150 degrees)//
+        //High = blue/violet (200-280 degrees)//
+        float hue = (lowRatio * 30f + midRatio * 120f + highRatio * 240f) / 360f;
 
-        //Weighted blend of all three colours by their ratios//
-        Color blended = lowColour * lowRatio + midColour * midRatio + highColour * highRatio;
+        //Saturation driven by how dominant the the winning band is if one band clealry dominates, colour is vivid. if all equal, more grey//
+        float maxRatio = Mathf.Max(lowRatio, midRatio, highRatio);
+        float saturation = Mathf.Lerp(0.2f, 1f, (maxRatio - 0.33f) / 0.67f);
 
-        //Normalise birghtness so no channel dominance makes it too dark//
-        float brightness = Mathf.Lerp(0.5f, 1.0f, _analyser.EnergyOverTime[segment] / _analyser.PeakEnergy);
-        return blended * brightness;
+        //Brightness driven by energy//
+        float brightness = Mathf.Lerp(0.4f, 1f, _analyser.EnergyOverTime[segment] / _analyser.PeakEnergy);
+
+        return Color.HSVToRGB(hue, saturation, brightness);
+    }
+
+    private PrimitiveType GetShapeFromEnergy(float normalizedEnergy)
+    {
+        if (normalizedEnergy < 0.4f) return PrimitiveType.Cube;
+        if (normalizedEnergy < 0.7f) return PrimitiveType.Sphere;
+        return PrimitiveType.Cylinder; //Unity doesnt have a pyramid primitive//
     }
 
     private bool IsInsideShape(int x, int z, int size)
@@ -173,5 +196,21 @@ public class SpatialGenerator : MonoBehaviour
             default:
                 return true;
         }
+    }
+
+    private float GetMusicalDistance(int segA, int segB)
+    {
+        //How different are two segments musically//
+        //Combines energy difference and frequency character difference//
+        float energyDiff = Mathf.Abs(_analyser.EnergyOverTime[segA] - _analyser.EnergyOverTime[segB]);
+
+        float lowDiff = Mathf.Abs(_analyser.LowEnergyOverTime[segA] - _analyser.LowEnergyOverTime[segB]);
+        float midDiff = Mathf.Abs(_analyser.MidEnergyOverTime[segA] - _analyser.MidEnergyOverTime[segB]);
+        float highDiff = Mathf.Abs(_analyser.HighEnergyOverTime[segA] - _analyser.HighEnergyOverTime[segB]);
+
+        float freqDiff = lowDiff + midDiff + highDiff;
+
+        //Weight energy difference more heavily than frequency difference//
+        return (energyDiff * 2f) + freqDiff;
     }
 }
