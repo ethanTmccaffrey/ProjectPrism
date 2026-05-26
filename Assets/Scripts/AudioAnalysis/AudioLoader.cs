@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.IO;
+using Unity.VisualScripting;
 
 public class AudioLoader : MonoBehaviour
 {
@@ -72,7 +73,8 @@ public class AudioLoader : MonoBehaviour
     {
         ReadBasicAudioData(loadedClip);
         audioSource.clip = loadedClip;
-        audioSource.Play();
+        audioSource.volume = 0f; //Silent Play during analysis//
+        audioSource.Play(); //Playing but silent//
 
         //Hand over to analyser//
         AudioAnalyser analyser = GetComponent<AudioAnalyser>();
@@ -105,11 +107,22 @@ public class AudioLoader : MonoBehaviour
             yield return null;
         }
 
+        //Pass AudioSource to OrganicGenerator for animation//
+        OrganicGenerator organic = GetComponent<OrganicGenerator>();
+        if (organic != null)
+        {
+            organic.Init(audioSource);
+        }
+
         SpatialGenerator generator = GetComponent<SpatialGenerator>();
         if (generator != null)
         {
             generator.Generate(analyser);
         }
+        //Set back to start and play at full volume//
+        audioSource.Stop();
+        audioSource.volume = 1f;
+        audioSource.Play();
     }
 
     public AudioClip GetLoadedClip() => loadedClip;
