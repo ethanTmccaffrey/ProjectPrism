@@ -73,8 +73,6 @@ public class AudioLoader : MonoBehaviour
     {
         ReadBasicAudioData(loadedClip);
         audioSource.clip = loadedClip;
-        audioSource.volume = 0f; //Silent Play during analysis//
-        audioSource.Play(); //Playing but silent//
 
         //Hand over to analyser//
         AudioAnalyser analyser = GetComponent<AudioAnalyser>();
@@ -84,10 +82,7 @@ public class AudioLoader : MonoBehaviour
             analyser.Analyse(loadedClip);
         }
 
-        
         StartCoroutine(WaitForAnalysisThenGenerate(analyser));
-        
-
     }
     void ReadBasicAudioData(AudioClip clip)
     {
@@ -119,9 +114,7 @@ public class AudioLoader : MonoBehaviour
         {
             generator.Generate(analyser);
         }
-        //Set back to start and play at full volume//
-        audioSource.Stop();
-        audioSource.volume = 1f;
+
         audioSource.Play();
     }
 

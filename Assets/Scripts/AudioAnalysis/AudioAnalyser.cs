@@ -17,16 +17,7 @@ public class AudioAnalyser : MonoBehaviour
     public float PitchRegister {  get; private set; } //0 = very low, 1 = very high//
 
     private AudioSource _audioSource;
-    private bool _spectrumAnalysisComplete = false;
-    private int _spectrumSampleCount = 0;
     private const int SPECTRUM_SAMPLES = 50; //Sample 50 frams then average//
-    private float[] _lowAccum = new float[1];
-    private float[] _midAccum = new float[1];
-    private float[] _highAccum = new float[1];
-    private const int FFT_SIZE = 1024;
-
-    private float _startDelay = 1f; // Wait half a second before sampling//
-    private float _timer = 0f;
 
     public bool AnalysisComplete { get; private set; } = false;
     public float[] LowEnergyOverTime { get; private set; }
@@ -39,53 +30,6 @@ public class AudioAnalyser : MonoBehaviour
         _audioSource = source;
     }
 
-    void Update()
-    {
-        if (_audioSource == null || _spectrumAnalysisComplete) return;
-        if(!_audioSource.isPlaying) return;
-
-        //Wait for audio to properly start before sampling//
-        _timer += Time.deltaTime;
-        if (_timer < _startDelay) return;
-
-        float[] spectrum = new float[FFT_SIZE];
-        _audioSource.GetSpectrumData(spectrum, 0, FFTWindow.BlackmanHarris);
-
-        //Split spectrum into three bands//
-        //Low: bins 0-10 (~10~500Hz)//
-        //Mid: bins 10-100 (~500~4.5kHz)//
-        //High: bins 100-512 (~4.5kHz~24kHz)//
-        float low = 0f, mid = 0f, high = 0f;
-
-        for (int i = 0; i < 10; i++) low += spectrum[i];
-        for (int i = 10; i < 100; i++) mid += spectrum[i];
-        for (int i = 100; i < FFT_SIZE / 2; i++) high += spectrum[i];
-
-        _lowAccum[0] += low / 10f;
-        _midAccum[0] += mid / 90f;
-        _highAccum[0] += high / 412f;
-
-        _spectrumSampleCount++;
-
-        if(_spectrumSampleCount >= SPECTRUM_SAMPLES)
-        {
-            LowFrequencyEnergy = _lowAccum[0] / SPECTRUM_SAMPLES;
-            MidFrequencyEnergy = _midAccum[0] / SPECTRUM_SAMPLES;
-            HighFrequencyEnergy = _highAccum[0] / SPECTRUM_SAMPLES;
-
-            //Calculate the pitch register as a 0-1 value//
-            //0 = all energy in low frequencies, 1 = all energy in high//
-            float total = LowFrequencyEnergy + MidFrequencyEnergy + HighFrequencyEnergy;
-            if(total > 0)
-            {
-                PitchRegister = (MidFrequencyEnergy + HighFrequencyEnergy * 2f) / (total + HighFrequencyEnergy);
-            }
-
-            _spectrumAnalysisComplete = true;
-            LogFrequencyResults();
-        }
-    }
-
     public void Analyse(AudioClip clip)
     {
         Debug.Log("PRISM: Beginning audio analysis...");
@@ -96,6 +40,7 @@ public class AudioAnalyser : MonoBehaviour
         EstimatedTempo = EstimateTempo(samples, clip);
 
         LogResults();
+        AnalysisComplete = true;
     }
 
     //Pull all raw sample data out of the clip//
@@ -192,100 +137,164 @@ public class AudioAnalyser : MonoBehaviour
 
     }
 
-    //Basic tempo estimation from energy peaks//
+    
     private float EstimateTempo(float[] samples, AudioClip clip)
     {
-        //Step 1: Build onset strength envelope//
-        //Instead of raw energy, measure sudden increases in energy//
-        //These correspond to note onsets and beats regardless of overall volume//
-        int beatSegmentSize = clip.frequency / 100;
-        int totalBeatSegments = samples.Length / beatSegmentSize;
+        //Approach Inspired by:
+        //Dixon, S. (2001) - Automatic Extraction of Tempo and Beat from Expressive Performances//
+        // McFee et al. (2015) - librosa: Audio and Music Signal Analysis in Python//
 
-        float[] rawEnergy = new float[totalBeatSegments];
-        float[] fineEnergy = new float[totalBeatSegments];
+        int sampleRate = clip.frequency;
+        int channels = clip.channels;
 
-        //First Pass: Get raw energy per segment//
-        for (int i = 0; i < totalBeatSegments; i++)
+        //10ms hop size//
+        int hopSize = sampleRate / 100;
+        int totalHops = samples.Length / (hopSize * channels);
+
+        //Step 1: Multi-band onset detection//
+        //Analyse bass, mid and high bands seperately//
+        //Inspired by Dixon's multi-band approach//
+        int fftSize = 1024;
+        float freqResolution = (float)sampleRate / fftSize;
+
+        int bassBin = Mathf.RoundToInt(250f / freqResolution);
+        int midBin = Mathf.RoundToInt(4000f / freqResolution);
+        int highBin = Mathf.Min(Mathf.RoundToInt(16000f / freqResolution), fftSize / 2 - 1);
+
+        float[] onsetBass = new float[totalHops];
+        float[] onsetMid = new float[totalHops];
+        float[] onsetHigh = new float[totalHops];
+
+        float[] prevBass = new float[1];
+        float[] prevMid = new float[1];
+        float[] prevHigh = new float[1];
+
+        for(int i = 0; i < totalHops; i++)
         {
-            float sum = 0f;
-            int start = i * beatSegmentSize;
-            int end = Mathf.Min(start + beatSegmentSize, samples.Length);
+            int start = i * hopSize * channels;
 
-            for (int j = start; j < end; j++)
+            float[] fftInput = new float[fftSize];
+            for(int j = 0; j < fftSize; j++)
             {
-                sum += samples[j] * samples[j];
+                int idx = start + j * channels;
+                if (idx < samples.Length) fftInput[j] = samples[idx];
             }
 
-            rawEnergy[i] = Mathf.Sqrt(sum / (end - start));
+            //Hanning window//
+            for(int j = 0; j < fftSize; j++)
+            {
+                float w = 0.5f * (1f - Mathf.Cos(2f * Mathf.PI * j / (fftSize - 1)));
+                fftInput[j] *= w;
+            }
+
+            float[] spectrum = FFT(fftInput);
+
+            //Sum each band//
+            float bass = 0f, mid = 0f, high = 0f;
+            for (int b = 1; b < bassBin; b++) bass += spectrum[b];
+            for (int b = bassBin; b < midBin; b++) mid += spectrum[b];
+            for (int b = midBin; b < highBin; b++) high += spectrum[b];
+
+            bass /= Mathf.Max(1, bassBin - 1);
+            mid /= Mathf.Max(1, midBin - bassBin);
+            high /= Mathf.Max(1, highBin - midBin);
+
+            //Positive flux only - onset = energy increase//
+            onsetBass[i] = Mathf.Max(0f, bass - prevBass[0]);
+            onsetMid[i] = Mathf.Max(0f, mid - prevMid[0]);
+            onsetHigh[i] = Mathf.Max(0f, high - prevHigh[0]);
+
+            prevBass[0] = bass;
+            prevMid[0] = mid;
+            prevHigh[0] = high;
         }
 
-        //Second Pass: onset strength = positive energy flux only//
-        //We only care about energy INCREASING not decreasing//
-        for(int i = 1; i < totalBeatSegments; i++)
+        //Step 2: Adaptive normalisation//
+        //Normalise each band's onset envelope against its local mean//
+        //Prevents quiet sections from being drowned out by loud ones//
+        //Inspired by Librosa's onset_strength normalisation//
+        int windowSize = 50;// 500ms local window//
+        float[] onsetCombined = new float[totalHops];
+
+        for(int i = 0; i < totalHops; i++)
         {
-            float diff = rawEnergy[i] - rawEnergy[i - 1];
-            fineEnergy[i] = Mathf.Max(0f, diff); //Only positive changes//
+            int wStart = Mathf.Max(0, i - windowSize / 2);
+            int wEnd = Mathf.Min(totalHops, i + windowSize / 2);
+
+            float meanBass = 0f, meanMid = 0f, meanHigh = 0f;
+            int count = wEnd - wStart;
+
+            for(int w = wStart; w < wEnd; w++)
+            {
+                meanBass += onsetBass[w];
+                meanMid += onsetMid[w];
+                meanHigh += onsetHigh[w];
+            }
+
+            meanBass /= count;
+            meanMid /= count;
+            meanHigh /= count;
+
+            //Normalise against local mean, weight bass heavily - kick drives tempo//
+            float normBass = meanBass > 0 ? onsetBass[i] / meanBass : 0f;
+            float normMid = meanMid > 0 ? onsetMid[i] / meanMid : 0f;
+            float normHigh = meanHigh > 0 ? onsetHigh[i] / meanHigh : 0f;
+
+            onsetCombined[i] = normBass * 0.5f + normMid * 0.3f + normHigh * 0.2f;
         }
 
-        //Step 2: Auto correlation//
-        //Looking for lags (delays) that correspond to BPM range 60-200//
-        //Convert BPM range to segment lag range//
-        //At 10ms per segment: 60 BPM = beat every 1000ms = 100 segments, 200 BPM = beat every 300ms = 30 segments//
-
+        //Step 3: Autocorrelation on combined onset envelope//
         int minLag = 30; //200 BPM//
-        int maxLag = 200; //30 BPM - Wider range//
+        int maxLag = 200; //30 BPM//
 
         float[] correlations = new float[maxLag + 1];
-        
-        for (int lag = minLag; lag <= maxLag; lag++)
+
+        for(int lag = minLag; lag <= maxLag; lag++)
         {
             float correlation = 0f;
-            int count = 0;
+            int n = 0;
 
-            for(int i = 0; i < fineEnergy.Length - lag; i++)
+            for(int i = 0; i < onsetCombined.Length - lag; i++)
             {
-                correlation += fineEnergy[i] * fineEnergy[i + lag];
-                count++;
+                correlation += onsetCombined[i] * onsetCombined[i + lag];
+                n++;
             }
 
-            correlations[lag] = correlation / count;
+            correlations[lag] = n > 0 ? correlation / n : 0f;
         }
-       
 
-        //Step 3: Find peaks in the correlation curve//
-        //A true beat period will have a strong peak and its multiples will also be strong//
-        //We score each lag by how well it predicts its own multiples//
+        //Step 4: Harmonic Scoring//
+        //A true beat period scores strongly at its multiples//
         float bestScore = -1f;
         int bestLag = minLag;
 
-        for (int lag = minLag; lag <= maxLag / 2; lag++)
+        for(int lag = minLag; lag <= maxLag / 2; lag++)
         {
             float score = correlations[lag];
-
-            //Check if double and triple this lag also have strong correlations//
-            //if so this is likely the fundamental beat period//
             int doubleLag = lag * 2;
             int tripleLag = lag * 3;
 
             if (doubleLag <= maxLag) score += correlations[doubleLag] * 0.5f;
             if (tripleLag <= maxLag) score += correlations[tripleLag] * 0.25f;
 
-            //Favour longer periods - subdivisions cluster at short lags//
+            //Slight bias toward longer periods//
             float lagBias = (float)(lag - minLag) / (maxLag / 2 - minLag);
-            score *= (1f + lagBias * 0.2f);
+            score *= (1f + lagBias * 0.15f);
 
-            if (score > bestScore)
+            if(score > bestScore)
             {
                 bestScore = score;
                 bestLag = lag;
             }
-
         }
 
-
-        //Step 4: convert best lag to BPM//
+        //Step 5: Convert to BPM//
         float periodMs = bestLag * 10f;
         float bpm = 60000f / periodMs;
+
+        //Half tempo correction - only when result is suspiciously low and doubling lands in a realistice range//
+        float doubleBPM = bpm * 2f;
+        if (bpm < 75f && doubleBPM >= 90f && doubleBPM <= 160) bpm = doubleBPM;
 
         return bpm;
     }
@@ -342,7 +351,6 @@ public class AudioAnalyser : MonoBehaviour
 
         return output;
     }
-
     private void LogResults()
     {
         Debug.Log("=== PRISM Analysis Results ===");
@@ -363,15 +371,5 @@ public class AudioAnalyser : MonoBehaviour
         Debug.Log(energyMap);
 
        
-    }
-
-    private void LogFrequencyResults()
-    {
-        Debug.Log("=== PRSIM Frequency Analysis ===");
-        Debug.Log("Low Frequency Energy: " + LowFrequencyEnergy.ToString("F6"));
-        Debug.Log("Mid Frequency Energy: " + MidFrequencyEnergy.ToString("F6"));
-        Debug.Log("High Frequency Energy: " + HighFrequencyEnergy.ToString("F6"));
-        Debug.Log("Pitch Register (0=Low, 1=High): " + PitchRegister.ToString("F3"));
-        AnalysisComplete = true;
     }
 }
