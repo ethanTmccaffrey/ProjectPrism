@@ -475,7 +475,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   useDynamicPath: 0
-  inspectorClip: {fileID: 8300000, guid: 29e07c327a87fa04797d5b9a248369a5, type: 3}
+  inspectorClip: {fileID: 8300000, guid: af712449586e606438b70aabade8291e, type: 3}
   filePath: C:\Users\ethan\Downloads\Ghost.mp3
 --- !u!4 &1200915370
 Transform:
@@ -516,7 +516,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: abfc5242d2f86b743847b56ffef4455d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  mode: 2
+  mode: 1
   gridSize: 64
   landscapeShape: 0
 --- !u!114 &1200915373
@@ -531,7 +531,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e840ceeda592c9c41ae98fc6022b6991, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  shape: 0
+  shape: 1
+  orbitGroups: 8
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

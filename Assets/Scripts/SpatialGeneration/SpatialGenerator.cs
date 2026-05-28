@@ -4,7 +4,7 @@ using UnityEngine;
 public class SpatialGenerator : MonoBehaviour
 {
     //Mode//
-    public enum GenerationMode { Landscape, Abstract, Organic }
+    public enum GenerationMode { Landscape, Organic, Abstract }
     public enum LandscapeShape { Square, Circle, Diamond, Cross}
     public enum GridSize { Small = 64, Medium = 128, Large = 256 }
 
@@ -125,14 +125,7 @@ public class SpatialGenerator : MonoBehaviour
         ApplyColour(obj, colour);
     }
 
-    private void PlaceShapeWithRotation(PrimitiveType type, Vector3 position, Vector3 scale, Color colour, Quaternion rotation)
-    {
-        GameObject obj = CreatePrimitiveChild(type, _generatedEnvironment);
-        obj.transform.rotation = rotation;
-        obj.transform.localScale = scale;
-        obj.transform.position = position;
-        ApplyColour(obj, colour);
-    }
+    
     public Color GetSegmentColour(int segment)
     {
         float low = _analyser.LowEnergyOverTime[segment];
@@ -162,7 +155,6 @@ public class SpatialGenerator : MonoBehaviour
 
         return Color.HSVToRGB(hue, saturation, brightness);
     }
-
     private PrimitiveType GetShapeFromEnergy(float normalizedEnergy)
     {
         if (normalizedEnergy < 0.4f) return PrimitiveType.Cube;
@@ -198,7 +190,7 @@ public class SpatialGenerator : MonoBehaviour
         }
     }
 
-    private float GetMusicalDistance(int segA, int segB)
+    public float GetMusicalDistance(int segA, int segB)
     {
         //How different are two segments musically//
         //Combines energy difference and frequency character difference//
