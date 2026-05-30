@@ -112,6 +112,7 @@ public class AudioLoader : MonoBehaviour
         SpatialGenerator generator = GetComponent<SpatialGenerator>();
         if (generator != null)
         {
+            generator.SetAudioSource(audioSource);
             generator.Generate(analyser);
         }
 
