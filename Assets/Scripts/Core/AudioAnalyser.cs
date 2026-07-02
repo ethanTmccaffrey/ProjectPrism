@@ -11,19 +11,27 @@ public class AudioAnalyser : MonoBehaviour
     public float PeakEnergy { get; private set; }
     public float AverageEnergy { get; private set; }
     public float EstimatedTempo {  get; private set; }
-    public float LowFrequencyEnergy { get; private set; }
-    public float MidFrequencyEnergy {get; private set; }
-    public float HighFrequencyEnergy { get; private set; }
-    public float PitchRegister {  get; private set; } //0 = very low, 1 = very high//
+    public float PitchRegister { get; private set; }
 
-    private AudioSource _audioSource;
-    private const int SPECTRUM_SAMPLES = 50; //Sample 50 frams then average//
-
-    public bool AnalysisComplete { get; private set; } = false;
+    //Perceptually scaled band arrays - used by spatial/particle system//
     public float[] LowEnergyOverTime { get; private set; }
     public float[] MidEnergyOverTime { get; private set; }
     public float[] HighEnergyOverTime { get; private set; }
 
+    //Raw unscaled band arrays - used by colour derivation//
+    //These preserve the true frequency balance without perceptual boosting//
+    public float[] RawLowEnergyOverTime { get; private set; }
+    public float[] RawMidEnergyOverTime { get; private set; }
+    public float[] RawHighEnergyOverTime { get; private set; }
+
+    //Track-level raw band averages for colour mapping//
+    public float RawLowAverage { get; private set; }
+    public float RawMidAverage { get; private set; }  
+    public float RawHighAverage { get; private set; }
+
+
+    private AudioSource _audioSource;
+    public bool AnalysisComplete { get; private set; } = false;
 
     public void Init(AudioSource source)
     {
@@ -58,6 +66,9 @@ public class AudioAnalyser : MonoBehaviour
         LowEnergyOverTime = new float[SEGMENTS];
         MidEnergyOverTime = new float[SEGMENTS];
         HighEnergyOverTime = new float[SEGMENTS];
+        RawLowEnergyOverTime = new float[SEGMENTS];
+        RawMidEnergyOverTime = new float[SEGMENTS];
+        RawHighEnergyOverTime = new float[SEGMENTS];
 
         int samplesPerSegment = samples.Length / SEGMENTS;
         int channels = clip.channels;
@@ -65,6 +76,10 @@ public class AudioAnalyser : MonoBehaviour
 
         float peak = 0f;
         float total = 0f;
+
+        float rawLowTotal = 0f;
+        float rawMidTotal = 0f;
+        float rawHighTotal = 0f;
 
         for(int i = 0; i < SEGMENTS; i++)
         {
@@ -112,19 +127,32 @@ public class AudioAnalyser : MonoBehaviour
             //High: 4000-20000Hz//
             int lowMaxBin = Mathf.RoundToInt(250f /  freqResolution);
             int midMaxBin = Mathf.RoundToInt(4000f / freqResolution);
-            int highMaxBin = Mathf.RoundToInt(20000f / freqResolution);
-            highMaxBin = Mathf.Min(highMaxBin, spectrum.Length - 1);
-
+            int highMaxBin = Mathf.Min(Mathf.RoundToInt(20000f / freqResolution), spectrum.Length - 1);
+           
             float sumLow = 0f, sumMid = 0f, sumHigh = 0f;
-
             for(int b = 1; b < lowMaxBin; b++) sumLow += spectrum[b];
             for(int b = lowMaxBin; b < midMaxBin; b++) sumMid += spectrum[b];
             for (int b = midMaxBin; b < highMaxBin; b++) sumHigh += spectrum[b];
 
-            //Normalise by bin count//
-            LowEnergyOverTime[i] = (sumLow / Mathf.Max(1, lowMaxBin - 1) * 3.5f);
-            MidEnergyOverTime[i] = (sumMid / Mathf.Max(1, midMaxBin - lowMaxBin) * 1.0f);
-            HighEnergyOverTime[i] = (sumHigh / Mathf.Max(1, highMaxBin - midMaxBin) * 8.0f);
+            //Raw normalised by bin cound only - no perceptual scailing//
+            //Used for colour derivation to preserve true frequency balance//
+            float rawLow = sumLow / Mathf.Max(1, lowMaxBin - 1);
+            float rawMid = sumMid / Mathf.Max(1, midMaxBin - lowMaxBin);
+            float rawHigh = sumHigh / Mathf.Max(1, highMaxBin - midMaxBin);
+
+            RawLowEnergyOverTime[i] = rawLow;
+            RawMidEnergyOverTime[i] = rawMid;
+            RawHighEnergyOverTime[i] = rawHigh;
+
+            rawLowTotal += rawLow;
+            rawMidTotal += rawMid;
+            rawHighTotal += rawHigh;
+
+            //Perceptually scaled versions - used by spatial/particle systems//
+            //Low x 3.5 and High x 8.0 compensate for natural amplitude drop off across the frequency spectruum in typical music production//
+            LowEnergyOverTime[i] = rawLow * 3.5f;
+            MidEnergyOverTime[i] = rawMid * 1.0f;
+            HighEnergyOverTime[i] = rawHigh * 8.0f;
 
             if (rms > peak) peak = rms;
             total += rms;
@@ -132,6 +160,11 @@ public class AudioAnalyser : MonoBehaviour
 
         PeakEnergy = peak;
         AverageEnergy = total / SEGMENTS;
+
+        //Store raw track-level averages for colour mapping//
+        RawLowAverage = rawLowTotal / SEGMENTS;
+        RawMidAverage = rawMidTotal / SEGMENTS;
+        RawHighAverage = rawHighTotal / SEGMENTS;
 
         return energy;
 
@@ -357,7 +390,7 @@ public class AudioAnalyser : MonoBehaviour
         Debug.Log("Peak Energy: " + PeakEnergy.ToString("F4"));
         Debug.Log("Average Energy: " + AverageEnergy.ToString("F4"));
         Debug.Log("Estimated BPM: " + EstimatedTempo.ToString("F1"));
-        Debug.Log("Energy over time (64 segments):");
+        Debug.Log($"Raw Band Averages - Low: {RawLowAverage:F6} Mid: {RawMidAverage:F6} High: {RawHighAverage:F6}");
 
         string energyMap = "";
         for (int i = 0; i < EnergyOverTime.Length; i++)

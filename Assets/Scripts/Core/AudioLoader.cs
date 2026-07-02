@@ -83,6 +83,7 @@ public class AudioLoader : MonoBehaviour
         }
 
         StartCoroutine(WaitForAnalysisThenGenerate(analyser));
+        audioSource.Play();
     }
     void ReadBasicAudioData(AudioClip clip)
     {
@@ -102,21 +103,11 @@ public class AudioLoader : MonoBehaviour
             yield return null;
         }
 
-        //Pass AudioSource to OrganicGenerator for animation//
-        OrganicGenerator organic = GetComponent<OrganicGenerator>();
-        if (organic != null)
+        PRISMGenerator generator = GetComponent<PRISMGenerator>();
+        if(generator != null)
         {
-            organic.Init(audioSource);
+            generator.Init(analyser, audioSource);
         }
-
-        SpatialGenerator generator = GetComponent<SpatialGenerator>();
-        if (generator != null)
-        {
-            generator.SetAudioSource(audioSource);
-            generator.Generate(analyser);
-        }
-
-        audioSource.Play();
     }
 
     public AudioClip GetLoadedClip() => loadedClip;
