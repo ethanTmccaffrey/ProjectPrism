@@ -9,6 +9,14 @@ public class PRISMGenerator : MonoBehaviour
     [SerializeField] private PostProcessingLayer postProcessingLayer;
     [SerializeField] private SDFLayer sdfLayer;
 
+    //Source points: two ears origin of everything in the scene//
+    //Left and Right positioned either side of the camera//
+    private Vector3 leftSourcePoint = new Vector3(-60f, 0f, 0f);
+    private Vector3 rightSourcePoint = new Vector3(60f, 0f, 0f);
+    public Vector3 LeftSourcePoint => leftSourcePoint;
+    public Vector3 RightSourcePoint => rightSourcePoint;
+
+
     //Six dervied qualities//
     [Header("Derived Qualities (Read Only)")]
     public float Space { get; private set; } //0 = Intimate, 1 = Vast//
@@ -32,13 +40,33 @@ public class PRISMGenerator : MonoBehaviour
     private AudioSource _audioSource;
     private bool _generating = false;
 
-    //Real-time spectrum//
-    private float[] _spectrum = new float[256];
+    //Stereo spectrum arrays, sampled independently per channel//
+    //Channel 0 = left ear, Channel 1 = right ear//
+    private float[] _spectrumLeft = new float[256];
+    private float[] _spectrumRight = new float[256];
+
+    //Combined spectrum for layers that dont need stereo//
+    public float[] Spectrum => _spectrumLeft;
+
+    //Mono Real-time values (averaged across both channels)//
     public float RealtimeEnergy { get; private set; }
     public float RealtimeBass { get; private set; } 
     public float RealtimeMid { get; private set; }
     public float RealtimeHigh { get; private set; }
-    public float[] Spectrum => _spectrum;
+
+    //Stereo realtime values - left channel//
+    //Driven by what the left ear is hearing moment to moment//
+    public float RealtimeEnergyLeft { get; private set; }
+    public float RealtimeBassLeft { get; private set; }
+    public float RealtimeMidLeft { get; private set; }
+    public float RealtimeHighLeft { get; private set; }
+
+    //Stereo realtime values - right channel//
+    public float RealtimeEnergyRight { get; private set; }
+    public float RealtimeBassRight { get; private set; }
+    public float RealtimeMidRight { get; private set; }
+    public float RealtimeHighRight { get; private set; }
+
 
     public void Init(AudioAnalyser analyser, AudioSource audioSource)
     {
@@ -163,43 +191,65 @@ public class PRISMGenerator : MonoBehaviour
     private void Update()
     {
         if (!_generating) return;
-        if(_audioSource == null || !_audioSource.isPlaying) return;
+        if (_audioSource == null || !_audioSource.isPlaying) return;
 
-        //Sample real-time spectrum data every frame//
-        _audioSource.GetSpectrumData(_spectrum, 0, FFTWindow.BlackmanHarris);
+        //Sample left and right channels independently//
+        _audioSource.GetSpectrumData(_spectrumLeft, 0, FFTWindow.BlackmanHarris);
+        _audioSource.GetSpectrumData(_spectrumRight, 1, FFTWindow.BlackmanHarris);
 
-        //Derive real-time energy values//
-        float bassSum = 0f; 
-        float midSum = 0f; 
-        float highSum = 0f; 
-        float totalSum = 0f;
-        int bassEnd = Mathf.RoundToInt(_spectrum.Length * 0.1f);
-        int midEnd = Mathf.RoundToInt(_spectrum.Length * 0.5f);
+        //Process left channel//
+        ProcessChannel(_spectrumLeft, out float bassL, out float midL, out float highL, out float energyL);
+        RealtimeBassLeft = bassL;
+        RealtimeMidLeft = midL;
+        RealtimeHighLeft = highL;
+        RealtimeEnergyLeft = energyL;
 
-        for(int i = 0; i < _spectrum.Length; i++)
-        {
-            totalSum += _spectrum[i];
-            if(i < bassEnd) bassSum += _spectrum[i];
-            else if(i < midEnd) midSum += _spectrum[i];
-            else highSum += _spectrum[i];
-        }
+        //Process right channel//
+        ProcessChannel(_spectrumRight, out float bassR, out float midR, out float highR, out float energyR);
+        RealtimeBassRight = bassR;
+        RealtimeMidRight = midR;
+        RealtimeHighRight = highR;
+        RealtimeEnergyRight = energyR;
 
-        RealtimeEnergy = totalSum / _spectrum.Length;
-        RealtimeBass = bassSum / Mathf.Max(bassEnd, 1);
-        RealtimeMid = midSum / Mathf.Max(midEnd - bassEnd, 1);
-        RealtimeHigh = highSum / Mathf.Max(_spectrum.Length - midEnd, 1);
+        //Mono values: average of both channels//
+        RealtimeBass = (bassL + bassR) * 0.5f;
+        RealtimeMid = (midL + midR) * 0.5f;
+        RealtimeHigh = (highL + highR) * 0.5f;
+        RealtimeEnergy = (energyL + energyR) * 0.5f;
 
-        //Derive realtime colour from current frequency balance//
-        //This shifts moment to moment as the music changes//
         UpdateRealtimeColour();
 
-        //Update all layers each frame//
         if (particleLayer != null) particleLayer.UpdateLayer(this);
         if (meshVolumeLayer != null) meshVolumeLayer.UpdateLayer(this);
         if (postProcessingLayer != null) postProcessingLayer.UpdateLayer(this);
         if (sdfLayer != null) sdfLayer.UpdateLayer(this);
     }
 
+    //Processes a single specturm array into bass/mid/energy values//
+    //Called seperately for left and right channels each frame//
+    private void ProcessChannel(float[] spectrum, out float bass, out float mid, out float high, out float energy)
+    {
+        float bassSum = 0f;
+        float midSum = 0f;
+        float highSum = 0f;
+        float totalSum = 0f;
+
+        int bassEnd = Mathf.RoundToInt(spectrum.Length * 0.1f);
+        int midEnd = Mathf.RoundToInt(spectrum.Length * 0.5f);
+
+        for (int i = 0; i < spectrum.Length; i++)
+        {
+            totalSum += spectrum[i];
+            if (i < bassEnd) bassSum += spectrum[i];
+            else if (i < midEnd) midSum += spectrum[i];
+            else highSum += spectrum[i];
+        }
+
+        bass = bassSum / Mathf.Max(bassEnd, 1);
+        mid = midSum / Mathf.Max(midEnd - bassEnd, 1);
+        high = highSum / Mathf.Max(spectrum.Length - midEnd, 1);
+        energy = totalSum / spectrum.Length;
+    }
     private void UpdateRealtimeColour()
     {
         //Same hue mapping as static derivation but applied to realtime bands//

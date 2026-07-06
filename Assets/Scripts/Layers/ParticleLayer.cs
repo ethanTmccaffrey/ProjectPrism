@@ -4,7 +4,7 @@ public class ParticleLayer : MonoBehaviour
 {
     [Header("Ambient System")]
     [SerializeField] private int ambientMaxParticles = 15000;
-    [SerializeField] private float ambientRadius = 40f;
+    [SerializeField] private float ambientRadius = 350f;
 
     [Header("Burst System")]
     [SerializeField] private int burstMaxParticles = 500;
@@ -15,10 +15,17 @@ public class ParticleLayer : MonoBehaviour
 
     //Particle Systems//
     private ParticleSystem _ambientSystem;
-    private ParticleSystem _burstSystem;
     private ParticleSystem.MainModule _ambientMain;
-    private ParticleSystem.MainModule _burstMain;
     private ParticleSystem.EmissionModule _ambientEmission;
+    private ParticleSystem.ShapeModule _ambientShape;
+
+    //Left burst system: fires from LeftSourcePoint, driven by left channel bass//
+    private ParticleSystem _burstSystemLeft;
+    private ParticleSystem.MainModule _burstMainLeft;
+
+    //Rihgt burst system: fires from RightSourcePoint, driven by right channel bass//
+    private ParticleSystem _burstSystemRight;
+    private ParticleSystem.MainModule _burstMainRight;
 
     //Static qualitties cached at Init//
     private float _spaceQuality;
@@ -33,14 +40,16 @@ public class ParticleLayer : MonoBehaviour
     private Color _secondaryColour;
 
     //Burst timing//
-    private float _burstCooldownTimer = 0f;
-    private float _prevBass = 0f;
+    private float _burstCooldownLeft = 0f;
+    private float _burstCooldownRight = 0f;
+    private float _prevBassLeft = 0f;
+    private float _prevBassRight = 0f;
 
+    //Throttle caches//
     private float _lastAmbientSpeed = 0f;
     private float _lastEmissionRate = 0f;
-    private float _lastBurstSpeed = 0f;
-
-    private ParticleSystem.ShapeModule _ambientShape;
+    private float _lastBurstSpeedLeft = 0f;
+    private float _lastBurstSpeedRight = 0f;
     private float _lastAmbientRadius = 0f;
     private float _lastMaxParticles = 0f;
     private float _smoothedRadius = 0f;
@@ -61,7 +70,6 @@ public class ParticleLayer : MonoBehaviour
 
         //Build both systems//
         BuildAmbientSystem();
-        BuildBurstSystem();
 
         Debug.Log($"PRISM ParticleLayer: Initialised. " + $"Primary: #{ColorUtility.ToHtmlStringRGB(_primaryColour)}  " + $"Secondary: #{ColorUtility.ToHtmlStringRGB(_secondaryColour)}");
     }
@@ -151,84 +159,13 @@ public class ParticleLayer : MonoBehaviour
         _ambientSystem.Play();
     }
 
-    private void BuildBurstSystem()
-    {
-        GameObject burstGO = new GameObject("BurstParticles");
-        burstGO.transform.SetParent(transform);
-        burstGO.transform.localPosition = Vector3.zero;
-
-        _burstSystem = burstGO.AddComponent<ParticleSystem>();
-
-        _burstMain = _burstSystem.main;
-        _burstMain.loop = false;
-        _burstMain.playOnAwake = false;
-        _burstMain.simulationSpace = ParticleSystemSimulationSpace.World;
-        _burstMain.maxParticles = burstMaxParticles;
-
-        //Short lifetime, burst particles appear and vanish//
-        _burstMain.startLifetime = new ParticleSystem.MinMaxCurve(0.4f, 0.9f);
-
-        //Fast outward speed//
-        float burstSpeed = Mathf.Lerp(20f, 60f, _motionQuality);
-        _burstMain.startSpeed = new ParticleSystem.MinMaxCurve(burstSpeed * 0.6f, burstSpeed);
-
-        //Burst particles are brighter and larger than ambient//
-        float burstSize = Mathf.Lerp(0.1f, 0.5f, _lightQuality);
-        _burstMain.startSize = new ParticleSystem.MinMaxCurve(burstSize * 0.5f, burstSize * 1.5f);
-
-        _burstMain.startColor = _primaryColour;
-
-        //Emission: controlled manually via Emit() calls, not auto rate//
-        var emission = _burstSystem.emission;
-        emission.enabled = false;
-
-        //Shape: emit from a small sphere at centre//
-        var shape = _burstSystem.shape;
-        shape.enabled = true;
-        shape.shapeType = ParticleSystemShapeType.Sphere;
-        shape.radius = 8f;
-
-        //Colour over lifetime: bright flash then fade through secondary colour//
-        var colourOverLifetime = _burstSystem.colorOverLifetime;
-        colourOverLifetime.enabled = true;
-        Gradient burstGrad = new Gradient();
-        burstGrad.SetKeys(
-            new GradientColorKey[] {
-                new GradientColorKey(Color.white, 0f),
-                new GradientColorKey(_primaryColour, 0.3f),
-                new GradientColorKey(_secondaryColour, 1f)
-            },
-            new GradientAlphaKey[] {
-                new GradientAlphaKey(1f, 0f),
-                new GradientAlphaKey(0.8f, 0.3f),
-                new GradientAlphaKey(0f, 1f)
-            }
-        );
-        colourOverLifetime.color = new ParticleSystem.MinMaxGradient(burstGrad);
-
-        //Size over lifetime: shrink as they travel//
-        var sizeOverLifetime = _burstSystem.sizeOverLifetime;
-        sizeOverLifetime.enabled = true;
-        AnimationCurve sizeCurve = new AnimationCurve();
-        sizeCurve.AddKey(0f, 1f);
-        sizeCurve.AddKey(1f, 0f);
-        sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, sizeCurve);
-
-        //Renderer//
-        var renderer = _burstSystem.GetComponent<ParticleSystemRenderer>();
-        renderer.renderMode = ParticleSystemRenderMode.Billboard;
-        renderer.material = GetParticleMaterial();
-    }
-
     public void UpdateLayer(PRISMGenerator generator)
     {
-        if (_ambientSystem == null || _burstSystem == null) return;
+        if (_ambientSystem == null || _burstSystemLeft == null || _burstSystemRight == null) return;
 
-        float bass = generator.RealtimeBass;
         float energy = generator.RealtimeEnergy;
 
-        //Modulate ambinet emission rate with overall energy//
-        //Quiet passages thin out, loud passages fill with particles//
+        //Ambient: driven by mono energy//
         float dynamicEmission = Mathf.Lerp(10f, 200f, energy * 60f);
         if (Mathf.Abs(dynamicEmission - _lastEmissionRate) > 1f)
         {
@@ -260,48 +197,6 @@ public class ParticleLayer : MonoBehaviour
             _ambientMain.maxParticles = targetCount;
             _lastMaxParticles = targetCount;
         }
-
-        //Bass burst trigger//
-        _burstCooldownTimer -= Time.deltaTime;
-
-        bool bassRising = bass > _prevBass;
-        bool bassAboveThreshold = bass > bassThreshold;
-        bool cooledDown = _burstCooldownTimer <= 0f;
-
-        if(bassRising && bassAboveThreshold && cooledDown)
-        {
-            TriggerBurst(bass, generator.RealtimeColour);
-            _burstCooldownTimer = burstCooldown;
-        }
-
-        _prevBass = bass;
-    }
-
-    private void TriggerBurst(float bassIntensity, Color realtimeColour)
-    {
-        //Scale particle count to bass intensity//
-        int count = Mathf.RoundToInt(Mathf.Lerp(20, 120, bassIntensity * 50f));
-        count = Mathf.Clamp(count, 5, burstMaxParticles);
-
-        //Scale burst speed to intensity//
-        float minSpeed = Mathf.Lerp(5f, 20f, _motionQuality);
-        float maxSpeed = Mathf.Lerp(25f, 80f, _motionQuality);
-        float speed = Mathf.Lerp(minSpeed, maxSpeed, bassIntensity * 50f);
-        if (Mathf.Abs(speed - _lastBurstSpeed) > 0.5f)
-        {
-            _burstMain.startSpeed = new ParticleSystem.MinMaxCurve(speed * 0.5f, speed);
-            _lastBurstSpeed = speed;
-        }
-
-        //Set burst colour to the current realtime frequency colour//
-        //This means bass hits during a high frequency moment flash cool/violet and bass drops during a low frequency moment flash warm/orange//
-        _burstMain.startColor = realtimeColour;
-
-        var burstShape = _burstSystem.shape;
-        //burstShape.radius = Mathf.Lerp(10f, 60f, bassIntensity * 50f);
-        burstShape.radius = Mathf.Lerp(5f, 30f, bassIntensity * 50f);
-
-        _burstSystem.Emit(count);
     }
 
     //Returns a default URP particle material//
@@ -309,8 +204,9 @@ public class ParticleLayer : MonoBehaviour
     private Material GetParticleMaterial()
     {
         //Use URP's default particles lit shader//
-        Shader shader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
-        if(shader == null)
+        Shader shader = Shader.Find("Universal Render Pipeline/Particles/Lit");
+        
+        if (shader == null)
         {
             //Fallback to legacy default//
             shader = Shader.Find("Particles/Standard Unlit");
@@ -324,6 +220,8 @@ public class ParticleLayer : MonoBehaviour
         Material mat = new Material(shader);
         mat.SetFloat("_Surface", 1f); //Transparent//
         mat.SetFloat("_Blend", 2f); //Additive blending//
+        mat.SetFloat("_SoftParticlesEnabled", 1f);
+        mat.SetFloat("_SoftParticlesFadeDistance", 2f);
         mat.enableInstancing = true;
         return mat;
     }
