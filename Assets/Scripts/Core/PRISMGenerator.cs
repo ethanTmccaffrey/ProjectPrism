@@ -2,98 +2,141 @@ using UnityEngine;
 
 public class PRISMGenerator : MonoBehaviour
 {
-    //Layer References//
-    [Header("Visual Layers")]
-    [SerializeField] private ParticleLayer particleLayer;
-    [SerializeField] private MeshVolumeLayer meshVolumeLayer;
+    //Atmosphere layers: always present//
+    [Header("Atmosphere Layers")]
     [SerializeField] private PostProcessingLayer postProcessingLayer;
     [SerializeField] private SDFLayer sdfLayer;
 
-    //Source points: two ears origin of everything in the scene//
-    //Left and Right positioned either side of the camera//
-    private Vector3 leftSourcePoint = new Vector3(-60f, 0f, 0f);
-    private Vector3 rightSourcePoint = new Vector3(60f, 0f, 0f);
+    //Generator references: populated by finding components on child GameObjects//
+    //Each generator reads TimbralProfile weights to decide whether to activate//
+    [Header("Generators")]
+    [SerializeField] private ConcentricRingsGenerator concentricRings;
+    [SerializeField] private TunnelDepthGenerator tunnelDepth;
+    [SerializeField] private SpiralGrowthGenerator spiralGrowth;
+    [SerializeField] private RotationFieldGenerator rotationField;
+    [SerializeField] private DriftGenerator drift;
+    [SerializeField] private HoneycombGenerator honeycomb;
+    [SerializeField] private GridGratingGenerator gridGrating;
+    [SerializeField] private FiligreeGenerator filigree;
+    [SerializeField] private ReduplicationGenerator reduplication;
+    [SerializeField] private RadiationBurstGenerator radiationBurst;
+    [SerializeField] private FractureGenerator fracture;
+    [SerializeField] private CobwebSplineGenerator cobwebSpline;
+    [SerializeField] private ZigzagParallelGenerator zigzagParallel;
+    [SerializeField] private WavyParallelGenerator wavyParallel;
+    [SerializeField] private HatchingGenerator hatching;
+    [SerializeField] private FluidTendrilGenerator fluidTendril;
+    [SerializeField] private AmorphousSpeckGenerator amorphousSpeck;
+    [SerializeField] private BilateralDuplicationGenerator bilateralDuplication;
+    [SerializeField] private SpeckClusterGenerator speckCluster;
+    [SerializeField] private OrganicClusterGenerator organicCluster;
+
+    //Source Points: the two ears, origin of everything in the scene//
+    [Header("Source Points")]
+    [SerializeField] private Vector3 leftSourcePoint = new Vector3(-60f, 0f, 0f);
+    [SerializeField] private Vector3 rightSourcePoint = new Vector3(60f, 0f, 0f);
     public Vector3 LeftSourcePoint => leftSourcePoint;
     public Vector3 RightSourcePoint => rightSourcePoint;
 
-
-    //Six dervied qualities//
+    //Six derived qualities: track-level character, computed once at Init//
     [Header("Derived Qualities (Read Only)")]
-    public float Space { get; private set; } //0 = Intimate, 1 = Vast//
-    public float Light { get; private set; } //0 = Cool/Dark, 1 = Warm/Bright//
-    public float Form {  get; private set; } //0 = Smooth, 1 = Angular//
-    public float Colour { get; private set; } //0 = Cool hue, 1 = Warm hue//
-    public float Motion { get; private set; } //0 = Slow, 1 = Fast//
-    public float Scale { get; private set; } //0 = Uniform, 1 = Extreme Contrast//
+    public float Space { get; private set; } // 0 = Intimate, 1 = Vast//
+    public float Light { get; private set; } // 0 = Dark, 1 = Bright//
+    public float Form { get; private set; } // 0 = Smooth, 1 = Angular//
+    public float Colour { get; private set; } // 0 = Cool hue, 1 = Warm hue//
+    public float Motion { get; private set; } // 0 = Slow, 1 = Fast//
+    public float Scale { get; private set; } // 0 = Uniform, 1 = Extreme Contrast//
 
-    //Derived colours, computed once from raw frequency analysis//
-    //All layers use these instead of computing their own//
+    //Derived colours//
     public Color PrimaryColour { get; private set; }
     public Color SecondaryColour { get; private set; }
-
-    //Real time colour - shifts each frame with the current frequency balance//
-    //Used by burst particles and any layer that needs moment to moment colour response//
     public Color RealtimeColour { get; private set; }
 
-    //Audio Data//
+    //The timbral profile: updated every frame, read by all generators//
+    public TimbralProfile TimbralProfile { get; private set; }
+
+    //Audio//
     private AudioAnalyser _analyser;
     private AudioSource _audioSource;
     private bool _generating = false;
 
-    //Stereo spectrum arrays, sampled independently per channel//
-    //Channel 0 = left ear, Channel 1 = right ear//
+    //Stereo spectrum//
     private float[] _spectrumLeft = new float[256];
     private float[] _spectrumRight = new float[256];
-
-    //Combined spectrum for layers that dont need stereo//
     public float[] Spectrum => _spectrumLeft;
 
-    //Mono Real-time values (averaged across both channels)//
+    //Mono realtime values//
     public float RealtimeEnergy { get; private set; }
-    public float RealtimeBass { get; private set; } 
+    public float RealtimeBass { get; private set; }
     public float RealtimeMid { get; private set; }
     public float RealtimeHigh { get; private set; }
 
-    //Stereo realtime values - left channel//
-    //Driven by what the left ear is hearing moment to moment//
+    //Stereo realtime values//
     public float RealtimeEnergyLeft { get; private set; }
     public float RealtimeBassLeft { get; private set; }
     public float RealtimeMidLeft { get; private set; }
     public float RealtimeHighLeft { get; private set; }
-
-    //Stereo realtime values - right channel//
     public float RealtimeEnergyRight { get; private set; }
     public float RealtimeBassRight { get; private set; }
     public float RealtimeMidRight { get; private set; }
     public float RealtimeHighRight { get; private set; }
-
 
     public void Init(AudioAnalyser analyser, AudioSource audioSource)
     {
         _analyser = analyser;
         _audioSource = audioSource;
 
-        //Derive the six static qualities from full track analysis//
+        //Inherit the TimbralProfile already computed by AudioAnalyser//
+        TimbralProfile = analyser.TimbralProfile;
+
         DeriveQualities();
         DeriveColours();
 
-        //Initialise all layers with the derived qualities//
-        if(particleLayer != null) particleLayer.Init(this);
-        if (meshVolumeLayer != null) meshVolumeLayer.Init(this);
-        if(postProcessingLayer != null) postProcessingLayer.Init(this);
-        if(sdfLayer != null) sdfLayer.Init(this);
+        //Init atmosphere layers//
+        if (postProcessingLayer != null) postProcessingLayer.Init(this);
+        if (sdfLayer != null) sdfLayer.Init(this);
+
+        //Init all generators: each one reads TimbralProfile to decide its behaviour//
+        InitGenerator(concentricRings);
+        InitGenerator(tunnelDepth);
+        InitGenerator(spiralGrowth);
+        InitGenerator(rotationField);
+        InitGenerator(drift);
+        InitGenerator(honeycomb);
+        InitGenerator(gridGrating);
+        InitGenerator(filigree);
+        InitGenerator(reduplication);
+        InitGenerator(radiationBurst);
+        InitGenerator(fracture);
+        InitGenerator(cobwebSpline);
+        InitGenerator(zigzagParallel);
+        InitGenerator(wavyParallel);
+        InitGenerator(hatching);
+        InitGenerator(fluidTendril);
+        InitGenerator(amorphousSpeck);
+        InitGenerator(bilateralDuplication);
+        InitGenerator(speckCluster);
+        InitGenerator(organicCluster);
 
         _generating = true;
 
-        Debug.Log("=== PRSIM Quality Derivation ===");
-        Debug.Log($"Space: {Space:F3} (0 = Intimate, 1 = Vast)");
-        Debug.Log($"Light: {Light:F3} (0 = Cool/Dark, 1 = Warm/Bright)");
-        Debug.Log($"Form: {Form:F3} (0 = Smooth, 1 = Angular)");
-        Debug.Log($"Colour: {Colour:F3} (0 = Cool hue, 1 = Warm hue)");
-        Debug.Log($"Motion: {Motion:F3} (0 = Slow, 1 = Fast)");
-        Debug.Log($"Scale: {Scale:F3} (0 = Uniform, 1 = Extreme Contrast)");
+        Debug.Log("=== PRISM Quality Derivation ===");
+        Debug.Log($"Space: {Space:F3} (0=Intimate, 1=Vast)");
+        Debug.Log($"Light: {Light:F3} (0=Dark, 1=Bright)");
+        Debug.Log($"Form: {Form:F3} (0=Smooth, 1=Angular)");
+        Debug.Log($"Colour: {Colour:F3} (0=Cool, 1=Warm)");
+        Debug.Log($"Motion: {Motion:F3} (0=Slow, 1=Fast)");
+        Debug.Log($"Scale: {Scale:F3} (0=Uniform, 1=Contrast)");
         Debug.Log($"Primary: #{ColorUtility.ToHtmlStringRGB(PrimaryColour)}");
         Debug.Log($"Secondary: #{ColorUtility.ToHtmlStringRGB(SecondaryColour)}");
+    }
+
+    //Calls Init on a generator if it is assigned//
+    private void InitGenerator(MonoBehaviour generator)
+    {
+        if (generator == null) return;
+        var method = generator.GetType().GetMethod("Init");
+        method?.Invoke(generator, new object[] { TimbralProfile });
     }
 
     private void DeriveQualities()
@@ -101,9 +144,6 @@ public class PRISMGenerator : MonoBehaviour
         float peakEnergy = _analyser.PeakEnergy;
         float averageEnergy = _analyser.AverageEnergy;
         float bpm = _analyser.EstimatedTempo;
-
-        //Use perceptually scaled values for spatial qualities//
-        //These are intentionally boosted to make energy differences more visible//
 
         float low = Average(_analyser.LowEnergyOverTime);
         float mid = Average(_analyser.MidEnergyOverTime);
@@ -114,11 +154,9 @@ public class PRISMGenerator : MonoBehaviour
         float midRatio = mid / total;
         float highRatio = high / total;
 
-        //Derive dynamic range: how much does energy vary across the track//
         float dynamicRange = peakEnergy - averageEnergy;
         float normalizedDynamic = Mathf.Clamp01(dynamicRange / Mathf.Max(peakEnergy, 0.001f));
 
-        //6 quality derivations//
         Space = normalizedDynamic;
         Light = Mathf.Clamp01((averageEnergy * 20f) * 0.5f + highRatio * 0.5f);
         Form = highRatio;
@@ -129,8 +167,6 @@ public class PRISMGenerator : MonoBehaviour
 
     private void DeriveColours()
     {
-        //Use RAW unscaled band averages for colour mapping//
-        //This preserves the true frequency character of the track without the perceptual scailing inflating bass//
         float rawLow = _analyser.RawLowAverage;
         float rawMid = _analyser.RawMidAverage;
         float rawHigh = _analyser.RawHighAverage;
@@ -140,52 +176,23 @@ public class PRISMGenerator : MonoBehaviour
         float midRatio = rawMid / rawTotal;
         float highRatio = rawHigh / rawTotal;
 
-        //Apply gentle perceptual weighting AFTER ratio calculation//
-        //High frequencies need a boost to have perceptual colour impact, but we weight after normalising so bass can't dominate//
+        float wL = lowRatio * 1.0f;
+        float wM = midRatio * 2.5f;
+        float wH = highRatio * 4.0f;
+        float wT = Mathf.Max(wL + wM + wH, 0.001f);
 
-        //Grounded in cross-modal correspondence: Cytowic (2002), Marks (1974)//
-        //Low - warm/red/orange (hue 0.00–0.10)//
-        //Mid - green/teal (hue 0.28–0.45)//
-        //High - violet/indigo (hue 0.65–0.80)//
+        wL /= wT; wM /= wT; wH /= wT;
 
-        float weightedLow = lowRatio * 1.0f;
-        float weightedMid = midRatio * 2.5f; //Mid underrepresnted in raw data//
-        float weightedHigh = highRatio * 4.0f; //High needs the most boost//
-
-        float weightedTotal = Mathf.Max(weightedLow + weightedMid + weightedHigh, 0.001f);
-
-        float wLow = weightedLow / weightedTotal;
-        float wMid = weightedMid / weightedTotal;
-        float wHigh = weightedHigh / weightedTotal;
-
-        //Hue: weighted blend across the full colour wheel//
-        float primaryHue = wLow * 0.04f + wMid * 0.35f + wHigh * 0.72f;
-
-        //Saturation: how strongly does one band dominate//
-        //A flat spectrum gives grey, a dominant band gives vivid colour//
-        float maxW = Mathf.Max(wLow,wMid, wHigh);
+        float primaryHue = wL * 0.04f + wM * 0.35f + wH * 0.72f;
+        float maxW = Mathf.Max(wL, wM, wH);
         float dominance = Mathf.Clamp01((maxW - 0.33f) / 0.67f);
         float primarySat = Mathf.Lerp(0.25f, 1f, dominance);
-
-        //Brightness: driven by Light quality (overall warmth/energy)//
         float primaryBright = Mathf.Lerp(0.5f, 1f, Light);
 
         PrimaryColour = Color.HSVToRGB(primaryHue, primarySat, primaryBright);
 
-        //Secondary: Complementary-ish offset — rotated ~150 degrees around the hue wheel.//
-        //This gives contrast without being a harsh exact complement (180 degrees).//
-        //Energy level shifts whether it leans warm or cool of the primary.//
-        float secondaryHueOffset = Mathf.Lerp(0.3f, 0.45f, Motion); // faster = wider split//
-        float secondaryHue = Mathf.Repeat(primaryHue + secondaryHueOffset, 1f);
-        //Secondary is slightly less saturated and darker — supporting role//
-        float secondarySat = primarySat * 0.65f;
-        float secondaryBright = primaryBright * Mathf.Lerp(0.55f, 0.8f, Space);
-
-        SecondaryColour = Color.HSVToRGB(secondaryHue, secondarySat, secondaryBright);
-
-        Debug.Log($"Raw Ratios — Low: {lowRatio:F3}  Mid: {midRatio:F3}  High: {highRatio:F3}");
-        Debug.Log($"Weighted  — Low: {wLow:F3}  Mid: {wMid:F3}  High: {wHigh:F3}");
-        Debug.Log($"Primary Hue: {primaryHue:F3}");
+        float secOffset = Mathf.Lerp(0.3f, 0.45f, Motion);
+        SecondaryColour = Color.HSVToRGB(Mathf.Repeat(primaryHue + secOffset, 1f), primarySat * 0.65f, primaryBright * Mathf.Lerp(0.55f, 0.8f, Space));
     }
 
     private void Update()
@@ -193,47 +200,72 @@ public class PRISMGenerator : MonoBehaviour
         if (!_generating) return;
         if (_audioSource == null || !_audioSource.isPlaying) return;
 
-        //Sample left and right channels independently//
+        //Sample stereo spectrum//
         _audioSource.GetSpectrumData(_spectrumLeft, 0, FFTWindow.BlackmanHarris);
         _audioSource.GetSpectrumData(_spectrumRight, 1, FFTWindow.BlackmanHarris);
 
-        //Process left channel//
+        //Process each channel//
         ProcessChannel(_spectrumLeft, out float bassL, out float midL, out float highL, out float energyL);
         RealtimeBassLeft = bassL;
         RealtimeMidLeft = midL;
         RealtimeHighLeft = highL;
         RealtimeEnergyLeft = energyL;
 
-        //Process right channel//
         ProcessChannel(_spectrumRight, out float bassR, out float midR, out float highR, out float energyR);
         RealtimeBassRight = bassR;
         RealtimeMidRight = midR;
         RealtimeHighRight = highR;
         RealtimeEnergyRight = energyR;
 
-        //Mono values: average of both channels//
+        //Mono averages//
         RealtimeBass = (bassL + bassR) * 0.5f;
         RealtimeMid = (midL + midR) * 0.5f;
         RealtimeHigh = (highL + highR) * 0.5f;
         RealtimeEnergy = (energyL + energyR) * 0.5f;
 
+        //Update realtime colour//
         UpdateRealtimeColour();
 
-        if (particleLayer != null) particleLayer.UpdateLayer(this);
-        if (meshVolumeLayer != null) meshVolumeLayer.UpdateLayer(this);
+        // Update timbral profile every frame — this is what makes mid-song timbral shifts (e.g. folk to metal transition) instantly reflected in generator weights//
+        TimbralProfile.UpdateRealtime(_spectrumLeft, _spectrumRight, Time.deltaTime);
+
+        //Update atmosphere layers//
         if (postProcessingLayer != null) postProcessingLayer.UpdateLayer(this);
         if (sdfLayer != null) sdfLayer.UpdateLayer(this);
+
+        //Update all generators — each reads TimbralProfile weights to decide whether to spawn marks, how many, and what shape//
+        UpdateGenerator(concentricRings);
+        UpdateGenerator(tunnelDepth);
+        UpdateGenerator(spiralGrowth);
+        UpdateGenerator(rotationField);
+        UpdateGenerator(drift);
+        UpdateGenerator(honeycomb);
+        UpdateGenerator(gridGrating);
+        UpdateGenerator(filigree);
+        UpdateGenerator(reduplication);
+        UpdateGenerator(radiationBurst);
+        UpdateGenerator(fracture);
+        UpdateGenerator(cobwebSpline);
+        UpdateGenerator(zigzagParallel);
+        UpdateGenerator(wavyParallel);
+        UpdateGenerator(hatching);
+        UpdateGenerator(fluidTendril);
+        UpdateGenerator(amorphousSpeck);
+        UpdateGenerator(bilateralDuplication);
+        UpdateGenerator(speckCluster);
+        UpdateGenerator(organicCluster);
     }
 
-    //Processes a single specturm array into bass/mid/energy values//
-    //Called seperately for left and right channels each frame//
+    private void UpdateGenerator(MonoBehaviour generator)
+    {
+        if (generator == null) return;
+        var method = generator.GetType().GetMethod("UpdateGenerator");
+        method?.Invoke(generator, new object[] { TimbralProfile });
+    }
+
     private void ProcessChannel(float[] spectrum, out float bass, out float mid, out float high, out float energy)
     {
-        float bassSum = 0f;
-        float midSum = 0f;
-        float highSum = 0f;
-        float totalSum = 0f;
-
+        float bassSum = 0f, midSum = 0f, highSum = 0f, totalSum = 0f;
         int bassEnd = Mathf.RoundToInt(spectrum.Length * 0.1f);
         int midEnd = Mathf.RoundToInt(spectrum.Length * 0.5f);
 
@@ -250,45 +282,34 @@ public class PRISMGenerator : MonoBehaviour
         high = highSum / Mathf.Max(spectrum.Length - midEnd, 1);
         energy = totalSum / spectrum.Length;
     }
+
     private void UpdateRealtimeColour()
     {
-        //Same hue mapping as static derivation but applied to realtime bands//
         float rtTotal = Mathf.Max(RealtimeBass + RealtimeMid + RealtimeHigh, 0.001f);
         float rtLow = RealtimeBass / rtTotal;
         float rtMid = RealtimeMid / rtTotal;
         float rtHigh = RealtimeHigh / rtTotal;
 
-        //Apply same perceptual weighting//
-        float wL = rtLow * 1.0f;
-        float wM = rtMid * 2.5f;
-        float wH = rtHigh * 4.0f;
+        float wL = rtLow * 1.0f, wM = rtMid * 2.5f, wH = rtHigh * 4.0f;
         float wT = Mathf.Max(wL + wM + wH, 0.001f);
 
-        float realtimeHue = (wL / wT) * 0.04f + (wM / wT) * 0.35f + (wH / wT) * 0.72f;
-
-        //Saturation and brightness from realtime energy//
+        float hue = (wL / wT) * 0.04f + (wM / wT) * 0.35f + (wH / wT) * 0.72f;
         float rtMax = Mathf.Max(wL / wT, wM / wT, wH / wT);
-        float rtDominance = Mathf.Clamp01((rtMax - 0.33f) / 0.67f);
-        float rtSat = Mathf.Lerp(0.3f, 1f, rtDominance);
-        float rtBright = Mathf.Lerp(0.4f, 1f, RealtimeEnergy * 50f);
-        rtBright = Mathf.Clamp01(rtBright);
+        float sat = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01((rtMax - 0.33f) / 0.67f));
+        float bright = Mathf.Clamp01(Mathf.Lerp(0.4f, 1f, RealtimeEnergy * 50f));
 
-
-        //Smooth the realtime colour to avoid strobing//
-        Color targetColour = Color.HSVToRGB(realtimeHue, rtSat, rtBright);
-        RealtimeColour = Color.Lerp(RealtimeColour, targetColour, Time.deltaTime * 6f);
+        RealtimeColour = Color.Lerp(RealtimeColour, Color.HSVToRGB(hue, sat, bright), Time.deltaTime * 6f);
     }
+
     private float Average(float[] values)
     {
-        if(values == null || values.Length == 0) return 0;
+        if (values == null || values.Length == 0) return 0;
         float sum = 0;
-        for(int i = 0; i < values.Length; i++) sum += values[i];
+        foreach (float v in values) sum += v;
         return sum / values.Length;
     }
 
-    public void Stop()
-    {
-        _generating = false;
-    }
+    public void Stop() => _generating = false;
 }
+
 

@@ -1,3 +1,4 @@
+#pragma warning disable 0414
 using UnityEngine;
 
 public class ParticleLayer : MonoBehaviour

@@ -1,5 +1,4 @@
-﻿using UnityEditor.Rendering.Universal;
-using UnityEngine;
+﻿using UnityEngine;
 
 public class AudioAnalyser : MonoBehaviour
 {
@@ -29,6 +28,15 @@ public class AudioAnalyser : MonoBehaviour
     public float RawMidAverage { get; private set; }  
     public float RawHighAverage { get; private set; }
 
+    //Average spectrum across full track: used by TimbralProfile.ComputeStatic//
+    public float[] AverageSpectrum { get; private set; }
+
+    //Raw samples stored for TimbralProfile ZCR computation//
+    private float[] _rawSamples;
+    private int _sampleRate;
+
+    //The timbral prfoile, computed once statically, then updated realtime by PRISMGenerator//
+    public TimbralProfile TimbralProfile { get; private set; } = new TimbralProfile();
 
     private AudioSource _audioSource;
     public bool AnalysisComplete { get; private set; } = false;
@@ -42,10 +50,14 @@ public class AudioAnalyser : MonoBehaviour
     {
         Debug.Log("PRISM: Beginning audio analysis...");
 
-        float[] samples = GetSamples(clip);
+        _rawSamples = GetSamples(clip);
+        _sampleRate = clip.frequency;
 
-        EnergyOverTime = CalculateEnergyOverTime(samples, clip);
-        EstimatedTempo = EstimateTempo(samples, clip);
+        EnergyOverTime = CalculateEnergyOverTime(_rawSamples, clip);
+        EstimatedTempo = EstimateTempo(_rawSamples, clip);
+        
+        //Compute static timbral profile from full track data//
+        TimbralProfile.ComputeStatic(AverageSpectrum, _rawSamples, _sampleRate, EnergyOverTime, EstimatedTempo); 
 
         LogResults();
         AnalysisComplete = true;
@@ -81,35 +93,30 @@ public class AudioAnalyser : MonoBehaviour
         float rawMidTotal = 0f;
         float rawHighTotal = 0f;
 
-        for(int i = 0; i < SEGMENTS; i++)
+        int fftSize = 4096;
+
+        //Accumulate spectrum across all segments for AverageSpectrumm..
+        float[] spectrumAccum = new float[fftSize / 2];
+
+        for (int i = 0; i < SEGMENTS; i++)
         {
             int start = i * samplesPerSegment;
             int end = Mathf.Min(start + samplesPerSegment, samples.Length);
             int segLength = end - start;
 
-            //Calculate RMS energy overall energy//
             float sumAll = 0f;
-            for(int j = start; j < end; ++j)
-            {
-               sumAll += samples[j] * samples[j];
-            }
-
+            for (int j = start; j < end; ++j) sumAll += samples[j] * samples[j];
             float rms = Mathf.Sqrt(sumAll / segLength);
             energy[i] = rms;
 
-            //FFT to get frequency content//
-            //use next power of 2 up to 4096 for accuracy//
-            int fftSize = 4096;
             float[] fftInput = new float[fftSize];
-
-            //Copy segment samples into FFT buffer (mono mix if stereo)//
-            for(int j = 0; j < fftSize; j++)
+            for (int j = 0; j < fftSize; j++)
             {
                 int sampleIndex = start + (j * channels);
-                if(sampleIndex < samples.Length) fftInput[j] = samples[sampleIndex];
+                if (sampleIndex < samples.Length) fftInput[j] = samples[sampleIndex];
             }
 
-            //Apply Hanning window to reduce spectural leakage//
+            // Hanning window
             for (int j = 0; j < fftSize; j++)
             {
                 float window = 0.5f * (1f - Mathf.Cos(2f * Mathf.PI * j / (fftSize - 1)));
@@ -118,24 +125,20 @@ public class AudioAnalyser : MonoBehaviour
 
             float[] spectrum = FFT(fftInput);
 
-            //Frequency resolution = sampleRate / fftSize//
-            float freqResolution = (float)sampleRate / fftSize;
+            // Accumulate for average spectrum
+            for (int j = 0; j < spectrumAccum.Length; j++)
+                spectrumAccum[j] += spectrum[j];
 
-            //Band boundaies in Hz//
-            //Low: 20-250Hz//
-            //Mid: 250-4000Hz//
-            //High: 4000-20000Hz//
-            int lowMaxBin = Mathf.RoundToInt(250f /  freqResolution);
+            float freqResolution = (float)sampleRate / fftSize;
+            int lowMaxBin = Mathf.RoundToInt(250f / freqResolution);
             int midMaxBin = Mathf.RoundToInt(4000f / freqResolution);
             int highMaxBin = Mathf.Min(Mathf.RoundToInt(20000f / freqResolution), spectrum.Length - 1);
-           
+
             float sumLow = 0f, sumMid = 0f, sumHigh = 0f;
-            for(int b = 1; b < lowMaxBin; b++) sumLow += spectrum[b];
-            for(int b = lowMaxBin; b < midMaxBin; b++) sumMid += spectrum[b];
+            for (int b = 1; b < lowMaxBin; b++) sumLow += spectrum[b];
+            for (int b = lowMaxBin; b < midMaxBin; b++) sumMid += spectrum[b];
             for (int b = midMaxBin; b < highMaxBin; b++) sumHigh += spectrum[b];
 
-            //Raw normalised by bin cound only - no perceptual scailing//
-            //Used for colour derivation to preserve true frequency balance//
             float rawLow = sumLow / Mathf.Max(1, lowMaxBin - 1);
             float rawMid = sumMid / Mathf.Max(1, midMaxBin - lowMaxBin);
             float rawHigh = sumHigh / Mathf.Max(1, highMaxBin - midMaxBin);
@@ -148,8 +151,7 @@ public class AudioAnalyser : MonoBehaviour
             rawMidTotal += rawMid;
             rawHighTotal += rawHigh;
 
-            //Perceptually scaled versions - used by spatial/particle systems//
-            //Low x 3.5 and High x 8.0 compensate for natural amplitude drop off across the frequency spectruum in typical music production//
+            // Perceptually scaled versions
             LowEnergyOverTime[i] = rawLow * 3.5f;
             MidEnergyOverTime[i] = rawMid * 1.0f;
             HighEnergyOverTime[i] = rawHigh * 8.0f;
@@ -161,10 +163,14 @@ public class AudioAnalyser : MonoBehaviour
         PeakEnergy = peak;
         AverageEnergy = total / SEGMENTS;
 
-        //Store raw track-level averages for colour mapping//
         RawLowAverage = rawLowTotal / SEGMENTS;
         RawMidAverage = rawMidTotal / SEGMENTS;
         RawHighAverage = rawHighTotal / SEGMENTS;
+
+        // Normalise accumulated spectrum to get average
+        AverageSpectrum = new float[spectrumAccum.Length];
+        for (int i = 0; i < spectrumAccum.Length; i++)
+            AverageSpectrum[i] = spectrumAccum[i] / SEGMENTS;
 
         return energy;
 
@@ -175,7 +181,7 @@ public class AudioAnalyser : MonoBehaviour
     {
         //Approach Inspired by:
         //Dixon, S. (2001) - Automatic Extraction of Tempo and Beat from Expressive Performances//
-        // McFee et al. (2015) - librosa: Audio and Music Signal Analysis in Python//
+        //McFee et al. (2015) - librosa: Audio and Music Signal Analysis in Python//
 
         int sampleRate = clip.frequency;
         int channels = clip.channels;
@@ -402,7 +408,5 @@ public class AudioAnalyser : MonoBehaviour
             else energyMap += "░";
         }
         Debug.Log(energyMap);
-
-       
     }
 }
