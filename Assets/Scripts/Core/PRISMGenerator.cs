@@ -33,8 +33,8 @@ public class PRISMGenerator : MonoBehaviour
 
     //Source Points: the two ears, origin of everything in the scene//
     [Header("Source Points")]
-    [SerializeField] private Vector3 leftSourcePoint = new Vector3(-60f, 0f, 0f);
-    [SerializeField] private Vector3 rightSourcePoint = new Vector3(60f, 0f, 0f);
+    [SerializeField] private Vector3 leftSourcePoint = new Vector3(-80f, 0f, 0f);
+    [SerializeField] private Vector3 rightSourcePoint = new Vector3(80f, 0f, 0f);
     public Vector3 LeftSourcePoint => leftSourcePoint;
     public Vector3 RightSourcePoint => rightSourcePoint;
 
@@ -52,8 +52,26 @@ public class PRISMGenerator : MonoBehaviour
     public Color SecondaryColour { get; private set; }
     public Color RealtimeColour { get; private set; }
 
+    [SerializeField, Range(0f, 0.5f)] private float hueTextureShift = 0.3f;
+
     //The timbral profile: updated every frame, read by all generators//
     public TimbralProfile TimbralProfile { get; private set; }
+
+    //Prominence coordination//
+    [SerializeField] private float activeFloor = 0.05f;
+    private GeneratorID _dominantId = GeneratorID.Count;
+    private float _dominantWeight = 0f;
+    private float[] _smoothWeights = new float[(int)GeneratorID.Count];
+    [SerializeField] private float prominenceSmoothing = 1.5f;
+
+
+    private readonly bool[] _registered = new bool[(int)GeneratorID.Count];
+
+    public void RegisterGenerator(GeneratorID id)
+    {
+        _registered[(int)id] = true;
+    }
+    public float TrackLength => _audioSource != null && _audioSource.clip != null ? _audioSource.clip.length : 0f;
 
     //Audio//
     private AudioAnalyser _analyser;
@@ -61,8 +79,8 @@ public class PRISMGenerator : MonoBehaviour
     private bool _generating = false;
 
     //Stereo spectrum//
-    private float[] _spectrumLeft = new float[256];
-    private float[] _spectrumRight = new float[256];
+    private float[] _spectrumLeft = new float[1024];
+    private float[] _spectrumRight = new float[1024];
     public float[] Spectrum => _spectrumLeft;
 
     //Mono realtime values//
@@ -80,6 +98,8 @@ public class PRISMGenerator : MonoBehaviour
     public float RealtimeBassRight { get; private set; }
     public float RealtimeMidRight { get; private set; }
     public float RealtimeHighRight { get; private set; }
+
+    
 
     public void Init(AudioAnalyser analyser, AudioSource audioSource)
     {
@@ -135,6 +155,9 @@ public class PRISMGenerator : MonoBehaviour
     private void InitGenerator(MonoBehaviour generator)
     {
         if (generator == null) return;
+        var setPrism = generator.GetType().GetMethod("SetPrism");
+        setPrism?.Invoke(generator, new object[] { this });
+
         var method = generator.GetType().GetMethod("Init");
         method?.Invoke(generator, new object[] { TimbralProfile });
     }
@@ -229,6 +252,9 @@ public class PRISMGenerator : MonoBehaviour
         // Update timbral profile every frame — this is what makes mid-song timbral shifts (e.g. folk to metal transition) instantly reflected in generator weights//
         TimbralProfile.UpdateRealtime(_spectrumLeft, _spectrumRight, Time.deltaTime);
 
+        //Rank generators by weight once per frame so GetProminence() reads a cached result//
+        RankProminence();
+
         //Update atmosphere layers//
         if (postProcessingLayer != null) postProcessingLayer.UpdateLayer(this);
         if (sdfLayer != null) sdfLayer.UpdateLayer(this);
@@ -263,40 +289,101 @@ public class PRISMGenerator : MonoBehaviour
         method?.Invoke(generator, new object[] { TimbralProfile });
     }
 
+    //Prominence coordination//
+    //Finds the single dominant generator once per frame. Cheap: one pass over 20 floats Cached so every generator's GetProminence() call reads the same frame result//
+    private void RankProminence()
+    {
+        float[] w = TimbralProfile.Weights;
+        float s = Time.deltaTime * prominenceSmoothing;
+
+        _dominantId = GeneratorID.Count;
+        _dominantWeight = 0f;
+
+        for (int i = 0; i < w.Length; i++)
+        {
+            //Smooth every weight toward its raw value — this is what filters out blips//
+            _smoothWeights[i] = Mathf.Lerp(_smoothWeights[i], w[i], s);
+
+            if (!_registered[i]) continue;
+            if (_smoothWeights[i] > _dominantWeight)
+            {
+                _dominantWeight = _smoothWeights[i];
+                _dominantId = (GeneratorID)i;
+            }
+        }
+    }
+
+    public Prominence GetProminence(GeneratorID id)
+    {
+        if (!_registered[(int)id]) return Prominence.Silent;
+        float myWeight = _smoothWeights[(int)id]; //smoothed, matches the ranking
+
+        //Below the active floor = silent, no marks//
+        if (myWeight < activeFloor || _dominantWeight < activeFloor)
+            return Prominence.Silent;
+
+        bool dominant = (id == _dominantId);
+
+        //Share of the dominant weight — 1 for the leader, less for everyone else//
+        //This is the continuous centrality: a strong supporter sits near centre, a faint trace sits far out//
+        float share = Mathf.Clamp01(myWeight / _dominantWeight);
+
+        return new Prominence
+        {
+            isDominant = dominant,
+            //Dominant gets a guaranteed 1; others use their share//
+            centrality = dominant ? 1f : share,
+            //Prominence (size/density) also scales with share, but never fully zero//
+            //while active — even a trace should be visible//
+            prominence = Mathf.Lerp(0.2f, 1f, share)
+        };
+    }
+
     private void ProcessChannel(float[] spectrum, out float bass, out float mid, out float high, out float energy)
     {
-        float bassSum = 0f, midSum = 0f, highSum = 0f, totalSum = 0f;
-        int bassEnd = Mathf.RoundToInt(spectrum.Length * 0.1f);
-        int midEnd = Mathf.RoundToInt(spectrum.Length * 0.5f);
+        float nyquist = AudioSettings.outputSampleRate * 0.5f;
+        float binHz = nyquist / spectrum.Length;
 
-        for (int i = 0; i < spectrum.Length; i++)
+        int bassEnd = Mathf.Clamp(Mathf.RoundToInt(250f / binHz), 1, spectrum.Length - 1);
+        int midEnd = Mathf.Clamp(Mathf.RoundToInt(4000f / binHz), bassEnd + 1, spectrum.Length - 1);
+
+        float bassSum = 0f, midSum = 0f, highSum = 0f, totalSum = 0f;
+
+        for (int i = 1; i < spectrum.Length; i++)
         {
-            totalSum += spectrum[i];
-            if (i < bassEnd) bassSum += spectrum[i];
-            else if (i < midEnd) midSum += spectrum[i];
-            else highSum += spectrum[i];
+            float v = spectrum[i];
+            totalSum += v;
+            if (i < bassEnd) bassSum += v;
+            else if (i < midEnd) midSum += v;
+            else highSum += v;
         }
 
-        bass = bassSum / Mathf.Max(bassEnd, 1);
+        bass = bassSum / Mathf.Max(bassEnd - 1, 1);
         mid = midSum / Mathf.Max(midEnd - bassEnd, 1);
         high = highSum / Mathf.Max(spectrum.Length - midEnd, 1);
+
+        bass *= 1.0f;
+        mid *= 3.0f;
+        high *= 8.0f;
+
         energy = totalSum / spectrum.Length;
     }
 
     private void UpdateRealtimeColour()
     {
-        float rtTotal = Mathf.Max(RealtimeBass + RealtimeMid + RealtimeHigh, 0.001f);
-        float rtLow = RealtimeBass / rtTotal;
-        float rtMid = RealtimeMid / rtTotal;
-        float rtHigh = RealtimeHigh / rtTotal;
+        float centroid = TimbralProfile != null ? TimbralProfile.RealtimeCentroid : 0.5f;
 
-        float wL = rtLow * 1.0f, wM = rtMid * 2.5f, wH = rtHigh * 4.0f;
-        float wT = Mathf.Max(wL + wM + wH, 0.001f);
+        float t = Mathf.InverseLerp(0.10f, 0.55f, centroid);
 
-        float hue = (wL / wT) * 0.04f + (wM / wT) * 0.35f + (wH / wT) * 0.72f;
-        float rtMax = Mathf.Max(wL / wT, wM / wT, wH / wT);
-        float sat = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01((rtMax - 0.33f) / 0.67f));
-        float bright = Mathf.Clamp01(Mathf.Lerp(0.4f, 1f, RealtimeEnergy * 50f));
+        float baseHue = Mathf.Lerp(0.02f, 0.75f, t);
+
+        float flat = TimbralProfile != null ? TimbralProfile.RealtimeFlatness : 0.5f;
+        float hue = Mathf.Repeat(baseHue + (flat - 0.5f) * hueTextureShift, 1f);
+
+        float sat = Mathf.Lerp(1f, 0.35f, flat);
+
+        float e = TimbralProfile != null ? TimbralProfile.RealtimeEnergy : 0.5f;
+        float bright = Mathf.Clamp01(Mathf.Lerp(0.55f, 1f, e));
 
         RealtimeColour = Color.Lerp(RealtimeColour, Color.HSVToRGB(hue, sat, bright), Time.deltaTime * 6f);
     }

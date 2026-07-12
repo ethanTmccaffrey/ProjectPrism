@@ -31,10 +31,16 @@ public class TimbralProfile
     public float RealtimeStereoWidth { get; private set; }
     public float RealtimeEnergy { get; private set; }
 
+    //raw (unsmoothed) flux for this frame: exposed for onset/beat detection//
+    //RealtimeFlux is smoothed for weight stability, which blunts the sharp spikesbeat detectors need, generators doing onset detection read this instead//
+    //Lartillot & Toiviainen (2007); adaptive thresholding per Dixon (2001)//
+    public float RealtimeFluxRaw { get; private set; }
+
     //Generator weights (0-1)//
     //Each weight descirbes how strongly that generator should be active//
     //currently based on the realtime timbral measurements//
     //Weights are recomputed every frame in UpdateRealtimeWeights()//
+    public float[] Weights { get; private set; } = new float[(int)GeneratorID.Count];
 
     //Category 1: Tunnels and Funnels//
     public float WeightConcentricRings { get; private set; }
@@ -85,6 +91,14 @@ public class TimbralProfile
 
     private const float SMOOTH_SPEED = 5f; //Higher = more responsive, lower = smoother//
 
+    private float _fluxPeak = 0f;
+    private const float FLUX_PEAK_DECAY = 0.999f;
+    private float _fluxLevel = 0f;
+    private const float FLUX_LEVEL_DECAY = 2.0f;
+    private const float FLUX_SCALE = 1.5f;
+    private float _energyPeak = 0f;
+    private const float ENERGY_PEAK_DECAY = 0.999f;
+
     //Static Analysis//
     //Called once by AudioAnalyser after full track analysis completes, Takes averaged spectrum data and raw samples to compute track-level character//
     public void ComputeStatic(float[] averageSpectrum, float[] samples, int sampleRate, float[] energyOverTime, float estimateTempo)
@@ -114,39 +128,49 @@ public class TimbralProfile
         //Build mono spectrum by averaging left and right//
         int len = spectrumLeft.Length;
         float[] monoSpectrum = new float[len];
-        for (int i = 0; i < len; i++)
-            monoSpectrum[i] = (spectrumLeft[i] + spectrumRight[i]) * 0.5f;
+        for (int i = 0; i < len; i++) monoSpectrum[i] = (spectrumLeft[i] + spectrumRight[i]) * 0.5f;
 
         int sampleRate = 44100; //Standard: actual rate doesn't affect normalised values//
 
-        // Compute raw measurements this frame
+        //Compute raw measurements this frame//
         float rawFlatness = ComputeFlatness(monoSpectrum);
         float rawCentroid = ComputeCentroid(monoSpectrum, sampleRate);
         float rawFlux = _prevSpectrum != null ? ComputeFluxFrame(monoSpectrum, _prevSpectrum) : 0f;
+
+        //Expose raw (unscaled) flux immediately for onset detection//
+        RealtimeFluxRaw = rawFlux;
+
+        _fluxLevel = Mathf.Max(_fluxLevel * Mathf.Exp(-FLUX_LEVEL_DECAY * deltaTime), rawFlux);
+        float rawFluxNorm = Mathf.Clamp01(_fluxLevel / FLUX_SCALE);
+
         float rawHarmonic = ComputeHarmonicComplexity(monoSpectrum);
         float rawStereo = ComputeStereoWidth(spectrumLeft, spectrumRight);
 
         //Total energy for weight scaling//
         float rawEnergy = 0f;
         for (int i = 0; i < len; i++) rawEnergy += monoSpectrum[i];
-        rawEnergy = Mathf.Clamp01(rawEnergy / len * 100f);
+        _energyPeak = Mathf.Max(_energyPeak * ENERGY_PEAK_DECAY, rawEnergy);
+        rawEnergy = _energyPeak > 1e-9f ? Mathf.Clamp01(rawEnergy / _energyPeak) : 0f;
 
-        //ZCR requires samples — approximated from spectrum shape in realtime//
-        //High-frequency content correlates strongly with ZCR//
-        float rawZCR = rawCentroid * 0.7f + rawFlatness * 0.3f;
+        //ZCR requires samples — approximated in realtime from high-frequency energy ratio//
+        //The old proxy (centroid*0.7 + flatness*0.3) failed for mid-scooped distortion//
+        //where centroid sits moderate. Real ZCR tracks high-frequency density — the fizz//
+        //and edge of distortion — which lives in the upper bins regardless of centroid.//
+        float rawZCR = ComputeHighFreqRatio(monoSpectrum);
 
-        //Rhythmic regularity: approximate from flux variance//
-        //Consistent flux peaks = regular rhythm//
-        float rawRhythmic = _prevSpectrum != null ? Mathf.Clamp01(1f - Mathf.Abs(rawFlux - _smoothFlux) * 10f) : 0.5f;
+        //Rhythmic regularity is a structural property measured over a window of beats, not something readable from a single frame//
+        //Use the properly-computed static value (autocorrelation of the energy envelope) as the realtime baseline, so R is stable and correct rather than a flux-jitter artefact//
+        //Timbral texture (flatness, flux, centroid) still changes instantly; regularity is the slow one//
+        float rawRhythmic = StaticRhythmicRegularity;
 
         //Smooth all measurements//
         float s = deltaTime * SMOOTH_SPEED;
         _smoothFlatness = Mathf.Lerp(_smoothFlatness, rawFlatness, s);
-        _smoothFlux = Mathf.Lerp(_smoothFlux, rawFlux, s);
+        _smoothFlux = Mathf.Lerp(_smoothFlux, rawFluxNorm, s);
         _smoothCentroid = Mathf.Lerp(_smoothCentroid, rawCentroid, s);
         _smoothZCR = Mathf.Lerp(_smoothZCR, rawZCR, s);
         _smoothHarmonic = Mathf.Lerp(_smoothHarmonic, rawHarmonic, s);
-        _smoothRhythmic = Mathf.Lerp(_smoothRhythmic, rawRhythmic, s);
+        _smoothRhythmic = rawRhythmic;
         _smoothStereo = Mathf.Lerp(_smoothStereo, rawStereo, s);
         _smoothEnergy = Mathf.Lerp(_smoothEnergy, rawEnergy, s);
 
@@ -198,15 +222,15 @@ public class TimbralProfile
 
         //Category 3: Lattices and Honeycombs//
         //Regular rhythm, synthetic/precise — electronic, EDM, pop//
-        WeightHoneycomb = Saturate(R * tF * C);
+        WeightHoneycomb = Saturate(R * F * Mathf.Lerp(0.6f, 1f, C));
         WeightGridGrating = Saturate(R * X * C);
         WeightFiligree = Saturate(H * Mathf.Lerp(0f, 1f, F * 0.5f + 0.2f));
         WeightReduplication = Saturate(R * R * tF);
 
         //Category 4: Cobwebs and Radial Forms//
         //High ZCR, flatness — rock, metal, distorted//
-        WeightRadiationBurst = Saturate(X * Z * F);
-        WeightFracture = Saturate(F * F * Z * Z);  //Very high both = heavy metal//
+        WeightRadiationBurst = Saturate(X * Mathf.Lerp(0.5f, 1f, Z) * Mathf.Lerp(0.5f, 1f, F));
+        WeightFracture = Saturate(F * Z);  //Very high both = heavy metal//
         WeightCobwebSpline = Saturate(H * Mathf.Sqrt(F) * tX);
 
         //Category 5: Parallel Figures//
@@ -217,7 +241,7 @@ public class TimbralProfile
 
         //Category 6: Wavy Lines and Amorphous Forms//
         //Organic, flowing, irregular — folk, soul, blues//
-        WeightFluidTendril = Saturate(tF * tF * tZ);
+        WeightFluidTendril = Saturate(tF * tZ);
         WeightAmorphousSpeck = Saturate(tR * tF * E);
         WeightBilateralDuplication = Saturate(S * E); //Stereo width drives bilateral//
 
@@ -225,6 +249,29 @@ public class TimbralProfile
         //Low energy, sparse — quiet passages of anything//
         WeightSpeckCluster = Saturate((1f - E) * (1f - E));
         WeightOrganicCluster = Saturate(tF * tX * (1f - E + 0.1f));
+
+        //Mirror all weights into the indexable array, in GeneratorId order//
+        //The coordinator ranks this array; order MUST match the GeneratorId enum//
+        Weights[(int)GeneratorID.ConcentricRings] = WeightConcentricRings;
+        Weights[(int)GeneratorID.TunnelDepth] = WeightTunnelDepth;
+        Weights[(int)GeneratorID.SpiralGrowth] = WeightSpiralGrowth;
+        Weights[(int)GeneratorID.RotationField] = WeightRotationField;
+        Weights[(int)GeneratorID.Drift] = WeightDrift;
+        Weights[(int)GeneratorID.Honeycomb] = WeightHoneycomb;
+        Weights[(int)GeneratorID.GridGrating] = WeightGridGrating;
+        Weights[(int)GeneratorID.Filigree] = WeightFiligree;
+        Weights[(int)GeneratorID.Reduplication] = WeightReduplication;
+        Weights[(int)GeneratorID.RadiationBurst] = WeightRadiationBurst;
+        Weights[(int)GeneratorID.Fracture] = WeightFracture;
+        Weights[(int)GeneratorID.CobwebSpline] = WeightCobwebSpline;
+        Weights[(int)GeneratorID.ZigzagParallel] = WeightZigzagParallel;
+        Weights[(int)GeneratorID.WavyParallel] = WeightWavyParallel;
+        Weights[(int)GeneratorID.Hatching] = WeightHatching;
+        Weights[(int)GeneratorID.FluidTendril] = WeightFluidTendril;
+        Weights[(int)GeneratorID.AmorphousSpeck] = WeightAmorphousSpeck;
+        Weights[(int)GeneratorID.BilateralDuplication] = WeightBilateralDuplication;
+        Weights[(int)GeneratorID.SpeckCluster] = WeightSpeckCluster;
+        Weights[(int)GeneratorID.OrganicCluster] = WeightOrganicCluster;
     }
 
     //Clamps to 0-1 and applies a power curve so weights don't all fire weakly//
@@ -243,6 +290,12 @@ public class TimbralProfile
         int n = spectrum.Length / 2; // Use only meaningful half
         if (n == 0) return 0f;
 
+        //First pass: mean magnitude, to set an adaptive floor//
+        float mean = 0f;
+        for (int i = 1; i < n; i++) mean += spectrum[i];
+        mean /= (n - 1);
+        float floor = mean * 0.05f; //Ignore bins below 5% of mean — noise/silence//
+
         float logSum = 0f;
         float linearSum = 0f;
         int count = 0;
@@ -250,7 +303,7 @@ public class TimbralProfile
         for (int i = 1; i < n; i++)
         {
             float val = spectrum[i];
-            if (val > 1e-10f)
+            if (val > floor)
             {
                 logSum += Mathf.Log(val);
                 linearSum += val;
@@ -300,10 +353,33 @@ public class TimbralProfile
         for (int i = 0; i < n; i++)
         {
             float diff = current[i] - previous[i];
-            if (diff > 0) flux += diff * diff; //Positive flux only//
+            if (diff > 0) flux += diff; //Positive flux only//
         }
 
-        return Mathf.Clamp01(flux * 500f); //Scale to 0-1 range//
+        return flux; 
+    }
+
+    //High-frequency energy ratio — realtime proxy for ZCR//
+    //Fraction of total spectral energy in the upper half of the spectrum.//
+    //Distorted/rough content dumps energy across the highs, so this rises with//
+    //roughness even when the spectral centroid stays moderate (mid-scooped metal).//
+    //Gouyon et al. (2000) establish ZCR's link to high-frequency content.//
+    private float ComputeHighFreqRatio(float[] spectrum)
+    {
+        int n = spectrum.Length / 2;
+        if (n < 4) return 0f;
+
+        int mid = n / 2;
+        float low = 0f, high = 0f;
+        for (int i = 1; i < mid; i++) low += spectrum[i];
+        for (int i = mid; i < n; i++) high += spectrum[i];
+
+        float total = low + high;
+        if (total < 1e-9f) return 0f;
+
+        //Scale up: even bright content rarely puts >40% of energy in the top half,//
+        //so map that range onto 0-1 for usable dynamic range.//
+        return Mathf.Clamp01((high / total) / 0.15f);
     }
 
     //Average flux from energy over time (static version)//
@@ -320,6 +396,8 @@ public class TimbralProfile
 
         return Mathf.Clamp01(totalFlux / energyOverTime.Length * 20f);
     }
+
+
 
     //Zero Crossing Rate: how many times waveform crosses zero per second//
     //Gouyon et al. (2000): "On the use of ZCR for musical genre classification"//
@@ -338,8 +416,7 @@ public class TimbralProfile
         }
 
         float zcr = (float)crossings * step / samples.Length * sampleRate;
-        //Normalise: 0 = 0 crossings, 1 = 4000+ crossings/sec (distorted signals)//
-        return Mathf.Clamp01(zcr / 4000f);
+        return Mathf.Clamp01(zcr / 50000f);
     }
 
     //Harmonic Complexity: measures how many distinct spectral peaks exist//
@@ -367,8 +444,7 @@ public class TimbralProfile
             }
         }
 
-        //Normalise: 0 = no peaks, 1 = 20+ distinct harmonic peaks//
-        return Mathf.Clamp01(peakCount / 20f);
+        return Mathf.Clamp01(peakCount / 35f);
     }
 
     //Rhythmic Regularity: measures how consistent energy peaks are over time//
@@ -407,6 +483,6 @@ public class TimbralProfile
         for (int i = 0; i < n; i++)
             diff += Mathf.Abs(left[i] - right[i]);
 
-        return Mathf.Clamp01(diff / n * 200f);
+        return Mathf.Clamp01(diff / n * 2000f);
     }
 }

@@ -39,6 +39,7 @@ public class FluidTendrilGenerator : MonoBehaviour
 
     //Cached timbral values for colour use//
     private TimbralProfile _profile;
+    private PRISMGenerator _prism;
 
     //Colours sourced from PRISMGenerator via TimbralProfile colour context//
     private Color _primaryColour = Color.cyan;
@@ -54,9 +55,15 @@ public class FluidTendrilGenerator : MonoBehaviour
         public float lastAlpha = -1f;
     }
 
+    public void SetPrism(PRISMGenerator prism)
+    {
+        _prism = prism;
+    }
+
     public void Init(TimbralProfile profile) 
     {
         _profile = profile;
+        if (_prism != null) _prism.RegisterGenerator(GeneratorID.FluidTendril);
 
         //Unlit additvive material: tendrils glow with their own colour//
         Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
@@ -82,16 +89,19 @@ public class FluidTendrilGenerator : MonoBehaviour
         _active = weight > weightThreshold;
 
         //Debug.Log($"FluidTendril weight: {profile.WeightFluidTendril:F4}  active: {_active}  energy: {profile.RealtimeEnergy:F6}");
-        
+
         //Spawn new tendrills on sustained energy, not sharp transients//
         if (_active && profile.RealtimeEnergy > energyThreshold)
         {
             _spawnTimer -= Time.deltaTime;
             if (_spawnTimer <= 0f)
             {
-                //Scale spawn rate by weight, stronger timbral match = faster growth//
-                _spawnTimer = spawnInterval / Mathf.Max(weight, 0.1f);
-                SpawnTendril(profile);
+                //Prominence scales spawn rate: a dominant tendril grows fast and fills//
+                //the canvas, a minor one accumulates slowly as a peripheral trace.//
+                Prominence pr = _prism != null ? _prism.GetProminence(GeneratorID.FluidTendril) : Prominence.Silent;
+                float rateScale = Mathf.Lerp(0.4f, 1f, pr.prominence);
+                _spawnTimer = spawnInterval / Mathf.Max(weight * rateScale, 0.1f);
+                SpawnTendril(profile, pr);
             }
         }
         else
@@ -109,7 +119,7 @@ public class FluidTendrilGenerator : MonoBehaviour
         //Marks remain on canvas - stops spawning//
     }
 
-    private void SpawnTendril(TimbralProfile profile)
+    private void SpawnTendril(TimbralProfile profile, Prominence pr)
     {
         if (_marks.Count >= maxTendrils)
         {
@@ -125,19 +135,26 @@ public class FluidTendrilGenerator : MonoBehaviour
         float flux = profile.RealtimeFlux;
         float harmonic = profile.RealtimeHarmonicComplexity;
 
-        //Spawn origin: loosely random withing spawn sphere//
-        //Slight bias toward the horizontal plane (tendrils feel more natural drifting sideways)//
-        Vector3 origin = new Vector3(Random.Range(-spawnRadius, spawnRadius), Random.Range(-spawnRadius * 0.4f, spawnRadius * 0.4f), Random.Range(-spawnRadius * 0.6f, spawnRadius * 0.6f));
+        //Prominence scales the spawn field: dominant tendrils fill a wide sphere centred//
+        //on the canvas, minor ones cluster in a small area pushed off-centre.//
+        float area = spawnRadius * Mathf.Lerp(0.4f, 1f, pr.prominence);
+        Vector3 fieldCentre = transform.position + Random.onUnitSphere * (spawnRadius * (1f - pr.centrality));
+
+        //Spawn origin: loosely random within the (prominence-scaled) spawn field//
+        Vector3 origin = fieldCentre + new Vector3(Random.Range(-area, area), Random.Range(-area * 0.4f, area * 0.4f), Random.Range(-area * 0.6f, area * 0.6f));
 
         //Direction: slow gentle drift, biased by centroid//
         //Bright tracks drift upward, dark tracks drift downward and sideways//
         Vector3 baseDir = new Vector3(Random.Range(-0.4f, 0.4f), Mathf.Lerp(-0.3f, 0.5f, centroid), Random.Range(-0.3f, 0.3f)).normalized; //Centroid drives vertical bias//
 
+        //Prominence scales overall mark size so a minor tendril reads as a fine trace//
+        float sizeScale = Mathf.Lerp(0.5f, 1f, pr.prominence);
+
         //Length vaires with harmonic complexity, complex music = longer tendrils//
-        float length = tendrilLength * Mathf.Lerp(0.5f, 1.5f, harmonic) * Random.Range(0.6f, 1.4f);
+        float length = tendrilLength * Mathf.Lerp(0.5f, 1.5f, harmonic) * Random.Range(0.6f, 1.4f) * sizeScale;
 
         //Width driven by flux, more percussive moments = slightly wider marks//
-        float width = tendrilWidth * Mathf.Lerp(0.4f, 1f, 1f - flux);
+        float width = tendrilWidth * Mathf.Lerp(0.4f, 1f, 1f - flux) * sizeScale;
 
         //Turbulence driven by harmonic complexity//
         //Simple tonal music = smooth curves, complex harmonics = more wayward curves//
@@ -154,7 +171,7 @@ public class FluidTendrilGenerator : MonoBehaviour
 
         //Colour: blend between primary and secondary based on centroid//
         //Bright passages pull toward secondary, dark toward primary//
-        Color markColour = DeriveColour(centroid, profile.RealtimeEnergy);
+        Color markColour = DeriveColour();
 
         //Create mark GameObject//
         GameObject markGO = new GameObject("FluidTendril");
@@ -205,7 +222,7 @@ public class FluidTendrilGenerator : MonoBehaviour
         Vector3 ribbonUp = new Vector3(Random.Range(-0.3f, 0.3f), Random.Range(0.5f, 1f), Random.Range(-0.3f, 0.3f)).normalized;
 
         Mesh mesh = GenerateRibbonMesh(points, tendrilWidth * 0.4f, ribbonUp);
-        Color branchCol = DeriveColour(profile.RealtimeCentroid, profile.RealtimeEnergy * 0.8f);
+        Color branchCol = DeriveColour();
 
         GameObject branchGo = new GameObject("FluidTendril_Branch");
         branchGo.transform.SetParent(transform);
@@ -341,16 +358,10 @@ public class FluidTendrilGenerator : MonoBehaviour
         return mesh;
     }
 
-    private Color DeriveColour(float centroid, float energy)
+    private Color DeriveColour()
     {
-        //Fluid tendrils use cool to mid hues, they represent smooth tonal music//
-        //Low centroid = deep blue/indigo, high centroid = cyan/teal//
-        float hue = Mathf.Lerp(0.55f, 0.45f, centroid); //Blue > teal//
-        float saturation = Mathf.Lerp(0.5f, 0.9f, energy * 80f);
-        float brightness = Mathf.Lerp(0.6f, 1f, centroid);
-        saturation = Mathf.Clamp01(saturation);
-        brightness = Mathf.Clamp01(brightness);
-        return Color.HSVToRGB(hue, saturation, brightness);
+        if (_prism != null) return _prism.RealtimeColour;
+        return Color.HSVToRGB(0.5f, 0.6f, 0.9f);
     }
 
     private void UpdateFades()
