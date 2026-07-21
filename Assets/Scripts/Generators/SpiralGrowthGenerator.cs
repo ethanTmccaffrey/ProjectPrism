@@ -47,7 +47,6 @@ public class SpiralGrowthGenerator : MonoBehaviour
 
     private bool _active = false;
     private bool _seeded = false;
-    private float _debugTimer = 0f;
     private float _growthAccumulator = 0f;
 
     //Spiral stats: locked at birth//
@@ -86,13 +85,6 @@ public class SpiralGrowthGenerator : MonoBehaviour
         _active = weight >= activationThreshold;
 
         Prominence pr = _prism != null ? _prism.GetProminence(GeneratorID.SpiralGrowth) : Prominence.Silent;
-
-        //_debugTimer += Time.deltaTime;
-        //if(_debugTimer >= 1f)
-        //{
-        //    _debugTimer = 0f;
-        //    Debug.Log($"[SPIRAL] weight={weight:F3} active={_active} points={_pointCount} " + $"H={profile.RealtimeHarmonicComplexity:F3} E={profile.RealtimeEnergy:F3} " + $"dominant={pr.isDominant} centrality={pr.centrality:F2} prominence={pr.prominence:F2}");
-        //}
 
         if (!_active) return;
         if (profile.RealtimeEnergy < energyThreshold) return;

@@ -54,7 +54,6 @@ public class BilateralDuplicationGenerator : MonoBehaviour
     private float _timeSinceLastBurst = 0f;
     private int _butterflyCount = 0;
     private bool _active = false;
-    private float _debugTimer = 0f;
     private bool _nextIsLeft = true;
     private float _elapsed = 0f;
 
@@ -97,15 +96,6 @@ public class BilateralDuplicationGenerator : MonoBehaviour
         PushFlux(flux);
 
         Prominence pr = _prism != null ? _prism.GetProminence(GeneratorID.BilateralDuplication) : Prominence.Silent;
-
-        _debugTimer += Time.deltaTime;
-        if (_debugTimer >= 1f)
-        {
-            _debugTimer = 0f;
-            Debug.Log($"[BILATERAL] weight={weight:F3} active={_active} butterflies={_butterflyCount} " +
-                      $"S={width:F3} E={profile.RealtimeEnergy:F3} nextEar={(_nextIsLeft ? "L" : "R")} " +
-                      $"dominant={pr.isDominant} centrality={pr.centrality:F2} prominence={pr.prominence:F2}");
-        }
 
         if (!_active) return;
         if (_butterflyCount >= maxButterflies) return;

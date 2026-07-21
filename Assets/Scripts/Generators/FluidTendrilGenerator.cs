@@ -162,7 +162,6 @@ public class FluidTendrilGenerator : MonoBehaviour
 
         //Generate the curve//
         Vector3[] points = GenerateCurvePoints(origin, baseDir, length, turbulence, centroid);
-        Debug.Log($"Curve points generated: {points.Length}, first: {points[0]}, last: {points[points.Length - 1]}");
 
         //Random Ribbon orientation os tendrils catch light differently//
         Vector3 ribbonUp = new Vector3(Random.Range(-0.2f, 0.2f), Random.Range(0.6f, 1f), Random.Range(-0.2f, 0.2f)).normalized;

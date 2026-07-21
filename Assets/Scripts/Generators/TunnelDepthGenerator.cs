@@ -56,7 +56,6 @@ public class TunnelDepthGenerator : MonoBehaviour
 
     private bool _active = false;
     private bool _seeded = false;
-    private float _debugTimer = 0f;
     private float _growthAccumulator = 0f;
 
     private Vector3 _mouthCentre;     

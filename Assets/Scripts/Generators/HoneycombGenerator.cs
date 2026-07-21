@@ -45,7 +45,6 @@ public class HoneycombGenerator : MonoBehaviour
     private float _timeSinceLastCell = 0f;
     private float _elapsed = 0f;
     private bool _active = false;
-    private float _debugTimer = 0f;
 
     private Material _edgeMaterial;
     private Material _fillMaterial;
@@ -97,15 +96,6 @@ public class HoneycombGenerator : MonoBehaviour
         PushFlux(flux);
 
         Prominence pr = _prism != null ? _prism.GetProminence(GeneratorID.Honeycomb) : Prominence.Silent;
-
-        _debugTimer += Time.deltaTime;
-        //if (_debugTimer >= 1f)
-        //{
-        //    _debugTimer = 0f;
-        //    Debug.Log($"[HONEYCOMB] weight={weight:F3} active={_active} cells={_cellCount} " +
-        //              $"R={profile.RealtimeRhythmicRegularity:F3} F={profile.RealtimeFlatness:F3} " +
-        //              $"dominant={pr.isDominant} centrality={pr.centrality:F2} prominence={pr.prominence:F2}");
-        //}
 
         if (!_active) return;
 

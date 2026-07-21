@@ -1,5 +1,24 @@
 using UnityEngine;
 
+//PRISMGenerator: the coordinator.
+//
+//Owns the TimbralProfile, samples it once per frame at the current playback position,
+//ranks the generators by weight to decide which is dominant, and drives every generator
+//and atmosphere layer.
+//
+//ARCHITECTURE NOTE - this class no longer performs any audio analysis.
+//
+//It used to call GetSpectrumData() every frame and hand a raw FFT buffer to
+//TimbralProfile, which recomputed every measurement from that single frame. That is
+//gone. Analysis now happens once, offline, before playback (see AudioAnalyser), and
+//Update() simply asks "what is the music doing at time T" - a lookup into a pre-computed
+//timeline rather than a per-frame computation.
+//
+//The generators are unaffected by this change. They read profile.WeightFracture,
+//profile.RealtimeEnergy, _prism.RealtimeColour, exactly as before. Putting TimbralProfile
+//between the audio and the generators is what made the measurement layer replaceable
+//without touching the twelve things that depend on it.
+
 public class PRISMGenerator : MonoBehaviour
 {
     //Atmosphere layers: always present//
@@ -7,8 +26,7 @@ public class PRISMGenerator : MonoBehaviour
     [SerializeField] private PostProcessingLayer postProcessingLayer;
     [SerializeField] private SDFLayer sdfLayer;
 
-    //Generator references: populated by finding components on child GameObjects//
-    //Each generator reads TimbralProfile weights to decide whether to activate//
+    //Generator references. Each reads TimbralProfile weights to decide whether to activate//
     [Header("Generators")]
     [SerializeField] private ConcentricRingsGenerator concentricRings;
     [SerializeField] private TunnelDepthGenerator tunnelDepth;
@@ -40,12 +58,12 @@ public class PRISMGenerator : MonoBehaviour
 
     //Six derived qualities: track-level character, computed once at Init//
     [Header("Derived Qualities (Read Only)")]
-    public float Space { get; private set; } // 0 = Intimate, 1 = Vast//
-    public float Light { get; private set; } // 0 = Dark, 1 = Bright//
-    public float Form { get; private set; } // 0 = Smooth, 1 = Angular//
-    public float Colour { get; private set; } // 0 = Cool hue, 1 = Warm hue//
-    public float Motion { get; private set; } // 0 = Slow, 1 = Fast//
-    public float Scale { get; private set; } // 0 = Uniform, 1 = Extreme Contrast//
+    public float Space { get; private set; }   //0 = Intimate, 1 = Vast//
+    public float Light { get; private set; }   //0 = Dark, 1 = Bright//
+    public float Form { get; private set; }    //0 = Smooth, 1 = Angular//
+    public float Colour { get; private set; }  //0 = Cool hue, 1 = Warm hue//
+    public float Motion { get; private set; }  //0 = Slow, 1 = Fast//
+    public float Scale { get; private set; }   //0 = Uniform, 1 = Extreme Contrast//
 
     //Derived colours//
     public Color PrimaryColour { get; private set; }
@@ -54,69 +72,68 @@ public class PRISMGenerator : MonoBehaviour
 
     [SerializeField, Range(0f, 0.5f)] private float hueTextureShift = 0.3f;
 
-    //The timbral profile: updated every frame, read by all generators//
+    //The timbral profile: sampled every frame, read by all generators//
     public TimbralProfile TimbralProfile { get; private set; }
 
     //Prominence coordination//
     [SerializeField] private float activeFloor = 0.05f;
+    [SerializeField] private float prominenceSmoothing = 1.5f;
     private GeneratorID _dominantId = GeneratorID.Count;
     private float _dominantWeight = 0f;
     private float[] _smoothWeights = new float[(int)GeneratorID.Count];
-    [SerializeField] private float prominenceSmoothing = 1.5f;
-
-
     private readonly bool[] _registered = new bool[(int)GeneratorID.Count];
 
-    public void RegisterGenerator(GeneratorID id)
-    {
-        _registered[(int)id] = true;
-    }
-    public float TrackLength => _audioSource != null && _audioSource.clip != null ? _audioSource.clip.length : 0f;
+    [Header("Debug")]
+    [SerializeField] private bool logWeights = false;
+    private float _debugTimer = 0f;
 
     //Audio//
     private AudioAnalyser _analyser;
     private AudioSource _audioSource;
     private bool _generating = false;
 
-    //Stereo spectrum//
-    private float[] _spectrumLeft = new float[1024];
-    private float[] _spectrumRight = new float[1024];
-    public float[] Spectrum => _spectrumLeft;
+    public float TrackLength => _audioSource != null && _audioSource.clip != null
+                                ? _audioSource.clip.length : 0f;
+    public float PlaybackTime => _audioSource != null ? _audioSource.time : 0f;
 
-    //Mono realtime values//
+    //Band levels, read from the analysed timeline rather than a live FFT.//
+    //Kept because the atmosphere layers read them.//
     public float RealtimeEnergy { get; private set; }
     public float RealtimeBass { get; private set; }
     public float RealtimeMid { get; private set; }
     public float RealtimeHigh { get; private set; }
 
-    //Stereo realtime values//
-    public float RealtimeEnergyLeft { get; private set; }
-    public float RealtimeBassLeft { get; private set; }
-    public float RealtimeMidLeft { get; private set; }
-    public float RealtimeHighLeft { get; private set; }
-    public float RealtimeEnergyRight { get; private set; }
-    public float RealtimeBassRight { get; private set; }
-    public float RealtimeMidRight { get; private set; }
-    public float RealtimeHighRight { get; private set; }
-
-    
+    public void RegisterGenerator(GeneratorID id)
+    {
+        _registered[(int)id] = true;
+    }
 
     public void Init(AudioAnalyser analyser, AudioSource audioSource)
     {
         _analyser = analyser;
         _audioSource = audioSource;
 
-        //Inherit the TimbralProfile already computed by AudioAnalyser//
+        //Inherit the profile already loaded by AudioAnalyser//
         TimbralProfile = analyser.TimbralProfile;
+
+        if (TimbralProfile == null || !TimbralProfile.Loaded)
+        {
+            Debug.LogError("PRISM: Init called with no loaded analysis - aborting");
+            return;
+        }
+
+        //Sample frame zero so the derived qualities and colours have real values to read//
+        TimbralProfile.SampleAt(0f);
 
         DeriveQualities();
         DeriveColours();
 
-        //Init atmosphere layers//
+        //Seed the realtime colour so the first marks are not black//
+        RealtimeColour = PrimaryColour;
+
         if (postProcessingLayer != null) postProcessingLayer.Init(this);
         if (sdfLayer != null) sdfLayer.Init(this);
 
-        //Init all generators: each one reads TimbralProfile to decide its behaviour//
         InitGenerator(concentricRings);
         InitGenerator(tunnelDepth);
         InitGenerator(spiralGrowth);
@@ -141,20 +158,20 @@ public class PRISMGenerator : MonoBehaviour
         _generating = true;
 
         Debug.Log("=== PRISM Quality Derivation ===");
-        Debug.Log($"Space: {Space:F3} (0=Intimate, 1=Vast)");
-        Debug.Log($"Light: {Light:F3} (0=Dark, 1=Bright)");
-        Debug.Log($"Form: {Form:F3} (0=Smooth, 1=Angular)");
+        Debug.Log($"Space:  {Space:F3} (0=Intimate, 1=Vast)");
+        Debug.Log($"Light:  {Light:F3} (0=Dark, 1=Bright)");
+        Debug.Log($"Form:   {Form:F3} (0=Smooth, 1=Angular)");
         Debug.Log($"Colour: {Colour:F3} (0=Cool, 1=Warm)");
         Debug.Log($"Motion: {Motion:F3} (0=Slow, 1=Fast)");
-        Debug.Log($"Scale: {Scale:F3} (0=Uniform, 1=Contrast)");
-        Debug.Log($"Primary: #{ColorUtility.ToHtmlStringRGB(PrimaryColour)}");
+        Debug.Log($"Scale:  {Scale:F3} (0=Uniform, 1=Contrast)");
+        Debug.Log($"Primary:   #{ColorUtility.ToHtmlStringRGB(PrimaryColour)}");
         Debug.Log($"Secondary: #{ColorUtility.ToHtmlStringRGB(SecondaryColour)}");
     }
 
-    //Calls Init on a generator if it is assigned//
     private void InitGenerator(MonoBehaviour generator)
     {
         if (generator == null) return;
+
         var setPrism = generator.GetType().GetMethod("SetPrism");
         setPrism?.Invoke(generator, new object[] { this });
 
@@ -162,34 +179,38 @@ public class PRISMGenerator : MonoBehaviour
         method?.Invoke(generator, new object[] { TimbralProfile });
     }
 
+    //The six derived qualities, now sourced from the analysed static profile.
+    //
+    //Previously these were computed from the analyser's own band arrays and RMS energy.
+    //Those measures are gone; these are their honest replacements, drawn from measures
+    //that were validated against tracks of known character.
     private void DeriveQualities()
     {
-        float peakEnergy = _analyser.PeakEnergy;
-        float averageEnergy = _analyser.AverageEnergy;
-        float bpm = _analyser.EstimatedTempo;
+        TimbralProfile p = TimbralProfile;
 
-        float low = Average(_analyser.LowEnergyOverTime);
-        float mid = Average(_analyser.MidEnergyOverTime);
-        float high = Average(_analyser.HighEnergyOverTime);
-        float total = Mathf.Max(low + mid + high, 0.001f);
+        //Vastness comes from dynamic range: music that swings between whisper and roar
+        //feels large; a compressed wall feels close and intimate.
+        Space = p.StaticDynamicRange;
 
-        float lowRatio = low / total;
-        float midRatio = mid / total;
-        float highRatio = high / total;
+        //Brightness is centroid, directly.
+        Light = p.StaticCentroid;
 
-        float dynamicRange = peakEnergy - averageEnergy;
-        float normalizedDynamic = Mathf.Clamp01(dynamicRange / Mathf.Max(peakEnergy, 0.001f));
+        //Angularity is percussiveness: attack-driven music reads as hard-edged, sustained
+        //music as smooth. This replaces the old high-frequency ratio, which conflated
+        //"bright" with "sharp".
+        Form = p.StaticPercussiveness;
 
-        Space = normalizedDynamic;
-        Light = Mathf.Clamp01((averageEnergy * 20f) * 0.5f + highRatio * 0.5f);
-        Form = highRatio;
-        Colour = lowRatio;
-        Motion = Mathf.Clamp01(Mathf.InverseLerp(60f, 180f, bpm));
-        Scale = normalizedDynamic;
+        //Warmth is the inverse of brightness: energy low in the spectrum reads warm.
+        Colour = 1f - p.StaticCentroid;
+
+        Motion = Mathf.Clamp01(Mathf.InverseLerp(60f, 180f, p.StaticTempo));
+
+        Scale = p.StaticDynamicRange;
     }
 
     private void DeriveColours()
     {
+        //Band balance at the start of the track, from the analysed timeline.//
         float rawLow = _analyser.RawLowAverage;
         float rawMid = _analyser.RawMidAverage;
         float rawHigh = _analyser.RawHighAverage;
@@ -215,51 +236,53 @@ public class PRISMGenerator : MonoBehaviour
         PrimaryColour = Color.HSVToRGB(primaryHue, primarySat, primaryBright);
 
         float secOffset = Mathf.Lerp(0.3f, 0.45f, Motion);
-        SecondaryColour = Color.HSVToRGB(Mathf.Repeat(primaryHue + secOffset, 1f), primarySat * 0.65f, primaryBright * Mathf.Lerp(0.55f, 0.8f, Space));
+        SecondaryColour = Color.HSVToRGB(
+            Mathf.Repeat(primaryHue + secOffset, 1f),
+            primarySat * 0.65f,
+            primaryBright * Mathf.Lerp(0.55f, 0.8f, Space));
     }
 
     private void Update()
     {
         if (!_generating) return;
         if (_audioSource == null || !_audioSource.isPlaying) return;
+        if (TimbralProfile == null || !TimbralProfile.Loaded) return;
 
-        //Sample stereo spectrum//
-        _audioSource.GetSpectrumData(_spectrumLeft, 0, FFTWindow.BlackmanHarris);
-        _audioSource.GetSpectrumData(_spectrumRight, 1, FFTWindow.BlackmanHarris);
+        //THE CORE CHANGE: sample the pre-computed timeline at the current playback
+        //position. No FFT, no spectrum buffer, no per-frame measurement. Everything the
+        //generators need was computed properly, offline, over the whole track.
+        TimbralProfile.SampleAt(_audioSource.time);
 
-        //Process each channel//
-        ProcessChannel(_spectrumLeft, out float bassL, out float midL, out float highL, out float energyL);
-        RealtimeBassLeft = bassL;
-        RealtimeMidLeft = midL;
-        RealtimeHighLeft = highL;
-        RealtimeEnergyLeft = energyL;
+        //Mirror the band values for the atmosphere layers//
+        RealtimeEnergy = TimbralProfile.RealtimeEnergy;
+        RealtimeBass = TimbralProfile.RealtimeBandLow;
+        RealtimeMid = TimbralProfile.RealtimeBandMid;
+        RealtimeHigh = TimbralProfile.RealtimeBandHigh;
 
-        ProcessChannel(_spectrumRight, out float bassR, out float midR, out float highR, out float energyR);
-        RealtimeBassRight = bassR;
-        RealtimeMidRight = midR;
-        RealtimeHighRight = highR;
-        RealtimeEnergyRight = energyR;
-
-        //Mono averages//
-        RealtimeBass = (bassL + bassR) * 0.5f;
-        RealtimeMid = (midL + midR) * 0.5f;
-        RealtimeHigh = (highL + highR) * 0.5f;
-        RealtimeEnergy = (energyL + energyR) * 0.5f;
-
-        //Update realtime colour//
         UpdateRealtimeColour();
 
-        // Update timbral profile every frame — this is what makes mid-song timbral shifts (e.g. folk to metal transition) instantly reflected in generator weights//
-        TimbralProfile.UpdateRealtime(_spectrumLeft, _spectrumRight, Time.deltaTime);
-
-        //Rank generators by weight once per frame so GetProminence() reads a cached result//
+        //Rank generators once per frame so every GetProminence() call reads the same result//
         RankProminence();
 
-        //Update atmosphere layers//
+        if (logWeights)
+        {
+            _debugTimer += Time.deltaTime;
+            if (_debugTimer >= 1f)
+            {
+                _debugTimer = 0f;
+                var p = TimbralProfile;
+                Debug.Log($"[PRISM t={_audioSource.time:F1}] " +
+                          $"F={p.RealtimeFlatness:F2} C={p.RealtimeCentroid:F2} " +
+                          $"H={p.RealtimeHarmonicComplexity:F2} " +
+                          $"E={p.RealtimeEnergy:F2} P={p.RealtimePercussiveRatio:F2} " +
+                          $"D={p.RealtimeOnsetDensity:F2} R={p.RealtimeRhythmicRegularity:F2} " +
+                          $"| dominant={_dominantId} ({_dominantWeight:F2})");
+            }
+        }
+
         if (postProcessingLayer != null) postProcessingLayer.UpdateLayer(this);
         if (sdfLayer != null) sdfLayer.UpdateLayer(this);
 
-        //Update all generators — each reads TimbralProfile weights to decide whether to spawn marks, how many, and what shape//
         UpdateGenerator(concentricRings);
         UpdateGenerator(tunnelDepth);
         UpdateGenerator(spiralGrowth);
@@ -290,7 +313,7 @@ public class PRISMGenerator : MonoBehaviour
     }
 
     //Prominence coordination//
-    //Finds the single dominant generator once per frame. Cheap: one pass over 20 floats Cached so every generator's GetProminence() call reads the same frame result//
+    //One pass over 20 floats per frame, cached so every generator reads the same ranking.//
     private void RankProminence()
     {
         float[] w = TimbralProfile.Weights;
@@ -301,7 +324,7 @@ public class PRISMGenerator : MonoBehaviour
 
         for (int i = 0; i < w.Length; i++)
         {
-            //Smooth every weight toward its raw value — this is what filters out blips//
+            //Smooth every weight toward its raw value - this filters out single-frame blips//
             _smoothWeights[i] = Mathf.Lerp(_smoothWeights[i], w[i], s);
 
             if (!_registered[i]) continue;
@@ -316,84 +339,50 @@ public class PRISMGenerator : MonoBehaviour
     public Prominence GetProminence(GeneratorID id)
     {
         if (!_registered[(int)id]) return Prominence.Silent;
-        float myWeight = _smoothWeights[(int)id]; //smoothed, matches the ranking
 
-        //Below the active floor = silent, no marks//
+        float myWeight = _smoothWeights[(int)id];
+
         if (myWeight < activeFloor || _dominantWeight < activeFloor)
             return Prominence.Silent;
 
         bool dominant = (id == _dominantId);
 
-        //Share of the dominant weight — 1 for the leader, less for everyone else//
-        //This is the continuous centrality: a strong supporter sits near centre, a faint trace sits far out//
+        //Share of the dominant weight: 1 for the leader, less for everyone else.//
+        //A strong supporter sits near centre, a faint trace sits far out.//
         float share = Mathf.Clamp01(myWeight / _dominantWeight);
 
         return new Prominence
         {
             isDominant = dominant,
-            //Dominant gets a guaranteed 1; others use their share//
             centrality = dominant ? 1f : share,
-            //Prominence (size/density) also scales with share, but never fully zero//
-            //while active — even a trace should be visible//
+            //Never fully zero while active - even a trace should be visible//
             prominence = Mathf.Lerp(0.2f, 1f, share)
         };
     }
 
-    private void ProcessChannel(float[] spectrum, out float bass, out float mid, out float high, out float energy)
-    {
-        float nyquist = AudioSettings.outputSampleRate * 0.5f;
-        float binHz = nyquist / spectrum.Length;
-
-        int bassEnd = Mathf.Clamp(Mathf.RoundToInt(250f / binHz), 1, spectrum.Length - 1);
-        int midEnd = Mathf.Clamp(Mathf.RoundToInt(4000f / binHz), bassEnd + 1, spectrum.Length - 1);
-
-        float bassSum = 0f, midSum = 0f, highSum = 0f, totalSum = 0f;
-
-        for (int i = 1; i < spectrum.Length; i++)
-        {
-            float v = spectrum[i];
-            totalSum += v;
-            if (i < bassEnd) bassSum += v;
-            else if (i < midEnd) midSum += v;
-            else highSum += v;
-        }
-
-        bass = bassSum / Mathf.Max(bassEnd - 1, 1);
-        mid = midSum / Mathf.Max(midEnd - bassEnd, 1);
-        high = highSum / Mathf.Max(spectrum.Length - midEnd, 1);
-
-        bass *= 1.0f;
-        mid *= 3.0f;
-        high *= 8.0f;
-
-        energy = totalSum / spectrum.Length;
-    }
-
     private void UpdateRealtimeColour()
     {
-        float centroid = TimbralProfile != null ? TimbralProfile.RealtimeCentroid : 0.5f;
+        TimbralProfile p = TimbralProfile;
 
-        float t = Mathf.InverseLerp(0.10f, 0.55f, centroid);
-
+        //Absolute centroid mapping: the same brightness always produces the same hue, so
+        //two different songs are directly comparable by colour. Relative (per-track
+        //normalised) mapping was tried and abandoned - it made every song span the full
+        //palette, which is exactly the convergence PRISM exists to avoid.
+        float t = Mathf.InverseLerp(0.25f, 0.75f, p.RealtimeCentroid);
         float baseHue = Mathf.Lerp(0.02f, 0.75f, t);
 
-        float flat = TimbralProfile != null ? TimbralProfile.RealtimeFlatness : 0.5f;
+        //Flatness as a texture-shift axis: noisier passages push the hue off the base
+        //mapping, so a gritty moment and a clean moment at the same brightness are
+        //distinguishable.
+        float flat = p.RealtimeFlatness;
         float hue = Mathf.Repeat(baseHue + (flat - 0.5f) * hueTextureShift, 1f);
 
         float sat = Mathf.Lerp(1f, 0.35f, flat);
+        float bright = Mathf.Clamp01(Mathf.Lerp(0.55f, 1f, p.RealtimeEnergy));
 
-        float e = TimbralProfile != null ? TimbralProfile.RealtimeEnergy : 0.5f;
-        float bright = Mathf.Clamp01(Mathf.Lerp(0.55f, 1f, e));
-
-        RealtimeColour = Color.Lerp(RealtimeColour, Color.HSVToRGB(hue, sat, bright), Time.deltaTime * 6f);
-    }
-
-    private float Average(float[] values)
-    {
-        if (values == null || values.Length == 0) return 0;
-        float sum = 0;
-        foreach (float v in values) sum += v;
-        return sum / values.Length;
+        RealtimeColour = Color.Lerp(RealtimeColour,
+                                    Color.HSVToRGB(hue, sat, bright),
+                                    Time.deltaTime * 6f);
     }
 
     public void Stop() => _generating = false;

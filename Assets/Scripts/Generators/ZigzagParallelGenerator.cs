@@ -53,7 +53,6 @@ public class ZigzagParallelGenerator : MonoBehaviour
     private float _timeSinceLastStroke = 0f;
     private int _strokeCount = 0;
     private bool _active = false;
-    private float _debugTimer = 0f;
     private float _fieldSeed;
 
     public void SetPrism(PRISMGenerator prism)
@@ -88,13 +87,6 @@ public class ZigzagParallelGenerator : MonoBehaviour
         PushFlux(flux);
 
         Prominence pr = _prism != null ? _prism.GetProminence(GeneratorID.ZigzagParallel) : Prominence.Silent;
-
-        //_debugTimer += Time.deltaTime;
-        //if (_debugTimer >= 1f)
-        //{
-        //    _debugTimer = 0f;
-        //    Debug.Log($"[ZIGZAG] weight={weight:F3} active={_active} strokes={_strokeCount} " + $"Z={profile.RealtimeZCR:F3} " + $"dominant={pr.isDominant} centrality={pr.centrality:F2} prominence={pr.prominence:F2}");
-        //}
 
         if (!_active) return;
         if (_strokeCount >= maxStrokes) return;
@@ -146,7 +138,7 @@ public class ZigzagParallelGenerator : MonoBehaviour
         lineCount = Mathf.Clamp(lineCount, 2, 5);
 
         //Zigzag sharpness (amplitude) from roughness//
-        float amplitude = Mathf.Lerp(minAmplitude, maxAmplitude, profile.RealtimeZCR);
+        float amplitude = Mathf.Lerp(minAmplitude, maxAmplitude, profile.RealtimePercussiveRatio);
 
         //Overall size from prominence//
         float sizeScale = Mathf.Lerp(0.5f, 1f, pr.prominence);

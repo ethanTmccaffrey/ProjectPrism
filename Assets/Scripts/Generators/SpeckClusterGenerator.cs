@@ -33,7 +33,6 @@ public class SpeckClusterGenerator : MonoBehaviour
     private Mesh _quadMesh;
 
     private bool _active = false;
-    private float _debugTimer = 0f;
     private float _spawnAccumulator = 0f;
     private int _speckCount = 0;
 

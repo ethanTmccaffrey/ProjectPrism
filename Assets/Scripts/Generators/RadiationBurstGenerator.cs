@@ -50,7 +50,7 @@ public class RadiationBurstGenerator : MonoBehaviour
     private float _timeSinceLastBurst = 0f;
     private int _burstCount = 0;
     private bool _active = false;
-    private float _debugTimer = 0f;
+
 
     public void SetPrism(PRISMGenerator prism)
     {
@@ -85,15 +85,6 @@ public class RadiationBurstGenerator : MonoBehaviour
         PushFlux(flux);
 
         Prominence pr = _prism != null ? _prism.GetProminence(GeneratorID.RadiationBurst) : Prominence.Silent;
-
-        //_debugTimer += Time.deltaTime;
-        //if (_debugTimer >= 1f)
-        //{
-        //    _debugTimer = 0f;
-        //    Debug.Log($"S={profile.RealtimeStereoWidth:F3} " + $"[BURST] weight={weight:F3} active={_active} bursts={_burstCount} " +
-        //              $"X={profile.RealtimeFlux:F3} Z={profile.RealtimeZCR:F3} F={profile.RealtimeFlatness:F3} " +
-        //              $"dominant={pr.isDominant} centrality={pr.centrality:F2} prominence={pr.prominence:F2}");
-        //}
 
         if (!_active) return;
         if (_burstCount >= maxBursts) return;
@@ -143,7 +134,7 @@ public class RadiationBurstGenerator : MonoBehaviour
         float sizeScale = Mathf.Lerp(0.5f, 1f, pr.prominence);
         float length = Mathf.Lerp(minRayLength, maxRayLength, strength) * sizeScale;
 
-        float jag = raggedness * profile.RealtimeZCR;
+        float jag = raggedness * profile.RealtimePercussiveRatio;
 
         Color colour = _prism != null ? _prism.RealtimeColour : Color.white;
 

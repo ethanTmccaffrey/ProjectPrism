@@ -1,412 +1,219 @@
-﻿using UnityEngine;
+﻿using System.Collections;
+using System.Diagnostics;
+using System.IO;
+using UnityEngine;
+using Debug = UnityEngine.Debug;
+
+//AudioAnalyser: runs the offline analysis pass and loads the result.
+//
+//This class used to be ~500 lines of DSP: a hand-written Cooley-Tukey FFT, spectral
+//flatness, centroid, inharmonicity, zero-crossing rate, an autocorrelation tempo
+//estimator. All of that is gone. Analysis now happens in prism_analyse.exe (librosa,
+//McFee et al. 2015), which is called as a subprocess before playback begins.
+//
+//Two reasons for the change:
+//
+//1. CORRECTNESS. The hand-rolled measures were repeatedly found to be measuring
+//   something other than what they claimed. Validated against tracks of known
+//   character, spectral flatness could not separate distorted guitar from dense
+//   synthesis; nor could spectral inharmonicity; and zero-crossing rate ranked an
+//   orchestral piece as rougher than metal. librosa's implementations are standard,
+//   peer-reviewed and citable, and the contribution of this project is the MAPPING from
+//   acoustic measurement to visual form, not the DSP underneath it.
+//
+//2. ARCHITECTURE. PRISM is a persistent canvas: the entire song is known before the
+//   first mark is drawn. Nothing ever required the analysis to happen live. Doing it
+//   offline means measures can be computed over a WINDOW of time rather than from a
+//   single spectral frame - which matters, because the measures that actually
+//   distinguish one song from another (rhythmic regularity, onset density, percussive
+//   ratio, dynamic range) are all temporal and cannot be read from an instant.
+//
+//Playback is now a lookup rather than a computation, so it is also considerably cheaper.
 
 public class AudioAnalyser : MonoBehaviour
 {
-    //How many chunks to split the audio into for analysis//
-    private const int SEGMENTS = 64;
+    [Header("Analyser")]
+    //Path to the bundled analyser executable, relative to StreamingAssets.//
+    [SerializeField] private string analyserExecutable = "prism_analyse.exe";
+    //Where the generated JSON is cached. Re-analysing a track is skipped if it exists.//
+    [SerializeField] private bool cacheAnalysis = true;
+    [SerializeField] private float timeoutSeconds = 300f;
 
-    //Stores the results - other systems will read from these//
-    public float[] EnergyOverTime {  get; private set; }
-    public float PeakEnergy { get; private set; }
-    public float AverageEnergy { get; private set; }
-    public float EstimatedTempo {  get; private set; }
-    public float PitchRegister { get; private set; }
+    public TimbralProfile TimbralProfile { get; private set; } = new TimbralProfile();
+    public bool AnalysisComplete { get; private set; } = false;
+    public bool AnalysisFailed { get; private set; } = false;
+    public string StatusMessage { get; private set; } = "";
 
-    //Perceptually scaled band arrays - used by spatial/particle system//
-    public float[] LowEnergyOverTime { get; private set; }
-    public float[] MidEnergyOverTime { get; private set; }
-    public float[] HighEnergyOverTime { get; private set; }
-
-    //Raw unscaled band arrays - used by colour derivation//
-    //These preserve the true frequency balance without perceptual boosting//
-    public float[] RawLowEnergyOverTime { get; private set; }
-    public float[] RawMidEnergyOverTime { get; private set; }
-    public float[] RawHighEnergyOverTime { get; private set; }
-
-    //Track-level raw band averages for colour mapping//
+    //Kept because PRISMGenerator.DeriveQualities() reads them. Sourced from the analysis//
+    //rather than computed here.//
+    public float EstimatedTempo => TimbralProfile.StaticTempo;
+    public float PeakEnergy { get; private set; } = 1f;
+    public float AverageEnergy { get; private set; } = 0.5f;
+    public float DynamicRange => TimbralProfile.StaticDynamicRange;
     public float RawLowAverage { get; private set; }
-    public float RawMidAverage { get; private set; }  
+    public float RawMidAverage { get; private set; }
     public float RawHighAverage { get; private set; }
 
-    //Average spectrum across full track: used by TimbralProfile.ComputeStatic//
-    public float[] AverageSpectrum { get; private set; }
+    private Process _process;
 
-    //Raw samples stored for TimbralProfile ZCR computation//
-    private float[] _rawSamples;
-    private int _sampleRate;
-
-    //The timbral prfoile, computed once statically, then updated realtime by PRISMGenerator//
-    public TimbralProfile TimbralProfile { get; private set; } = new TimbralProfile();
-
-    private AudioSource _audioSource;
-    public bool AnalysisComplete { get; private set; } = false;
-
-    public void Init(AudioSource source)
+    //Analyses the file at audioPath, then loads the result. Yields until done.//
+    public IEnumerator AnalyseFile(string audioPath)
     {
-        _audioSource = source;
+        AnalysisComplete = false;
+        AnalysisFailed = false;
+
+        if (!File.Exists(audioPath))
+        {
+            Fail("Audio file not found: " + audioPath);
+            yield break;
+        }
+
+        string jsonPath = Path.ChangeExtension(audioPath, ".prism.json");
+
+        //Skip the analysis pass if we have already done this track.//
+        if (cacheAnalysis && File.Exists(jsonPath))
+        {
+            Debug.Log("PRISM: cached analysis found, skipping analysis pass");
+            StatusMessage = "Loading cached analysis...";
+            if (LoadJson(jsonPath)) AnalysisComplete = true;
+            yield break;
+        }
+
+        string exePath = Path.Combine(Application.streamingAssetsPath, analyserExecutable);
+        if (!File.Exists(exePath))
+        {
+            Fail("Analyser not found at " + exePath +
+                 " - build it with PyInstaller and place it in StreamingAssets.");
+            yield break;
+        }
+
+        StatusMessage = "Analysing audio...";
+        Debug.Log("PRISM: launching analyser - " + exePath);
+
+        var info = new ProcessStartInfo
+        {
+            FileName = exePath,
+            Arguments = $"\"{audioPath}\" \"{jsonPath}\"",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+
+        _process = new Process { StartInfo = info };
+
+        bool started;
+        try
+        {
+            started = _process.Start();
+        }
+        catch (System.Exception e)
+        {
+            Fail("Could not start analyser: " + e.Message);
+            yield break;
+        }
+
+        if (!started)
+        {
+            Fail("Analyser failed to start");
+            yield break;
+        }
+
+        //Wait without blocking the main thread, so Unity keeps rendering a loading screen.//
+        float elapsed = 0f;
+        while (!_process.HasExited)
+        {
+            elapsed += Time.deltaTime;
+            if (elapsed > timeoutSeconds)
+            {
+                try { _process.Kill(); } catch { }
+                Fail($"Analyser timed out after {timeoutSeconds:F0}s");
+                yield break;
+            }
+            yield return null;
+        }
+
+        string stdout = _process.StandardOutput.ReadToEnd();
+        string stderr = _process.StandardError.ReadToEnd();
+        int exit = _process.ExitCode;
+        _process = null;
+
+        if (!string.IsNullOrEmpty(stdout)) Debug.Log("PRISM analyser:\n" + stdout.Trim());
+
+        if (exit != 0)
+        {
+            Fail($"Analyser exited with code {exit}\n{stderr}");
+            yield break;
+        }
+
+        if (!File.Exists(jsonPath))
+        {
+            Fail("Analyser reported success but produced no output file");
+            yield break;
+        }
+
+        StatusMessage = "Loading analysis...";
+        if (LoadJson(jsonPath)) AnalysisComplete = true;
     }
 
-    public void Analyse(AudioClip clip)
+    private bool LoadJson(string jsonPath)
     {
-        Debug.Log("PRISM: Beginning audio analysis...");
+        string json;
+        try
+        {
+            json = File.ReadAllText(jsonPath);
+        }
+        catch (System.Exception e)
+        {
+            Fail("Could not read analysis file: " + e.Message);
+            return false;
+        }
 
-        _rawSamples = GetSamples(clip);
-        _sampleRate = clip.frequency;
+        //Unity's JsonUtility maps JSON keys to field names, and "static" is a C# keyword
+        //so it cannot be a field. Rename the key before parsing rather than complicating
+        //the Python side - the JSON is a contract and should read naturally.
+        json = json.Replace("\"static\":", "\"stat\":");
 
-        EnergyOverTime = CalculateEnergyOverTime(_rawSamples, clip);
-        EstimatedTempo = EstimateTempo(_rawSamples, clip);
-        
-        //Compute static timbral profile from full track data//
-        TimbralProfile.ComputeStatic(AverageSpectrum, _rawSamples, _sampleRate, EnergyOverTime, EstimatedTempo); 
+        if (!TimbralProfile.LoadFromJson(json))
+        {
+            Fail("Analysis file could not be parsed");
+            return false;
+        }
 
-        LogResults();
-        AnalysisComplete = true;
+        //Populate the values PRISMGenerator still expects.//
+        //Band averages come straight from the static profile's spectral balance; the old
+        //code derived these from its own FFT.
+        RawLowAverage = TimbralProfile.RealtimeBandLow;
+        RawMidAverage = TimbralProfile.RealtimeBandMid;
+        RawHighAverage = TimbralProfile.RealtimeBandHigh;
+
+        //Sample frame zero so the band averages are populated before Init() reads them.//
+        TimbralProfile.SampleAt(0f);
+        RawLowAverage = TimbralProfile.RealtimeBandLow;
+        RawMidAverage = TimbralProfile.RealtimeBandMid;
+        RawHighAverage = TimbralProfile.RealtimeBandHigh;
+
+        PeakEnergy = 1f;   //frame energy is already normalised 0-1 by the analyser//
+        AverageEnergy = Mathf.Clamp01(1f - TimbralProfile.StaticDynamicRange * 0.5f);
+
+        StatusMessage = "Ready";
+        return true;
     }
 
-    //Pull all raw sample data out of the clip//
-    private float[] GetSamples(AudioClip clip)
+    private void Fail(string message)
     {
-        float[] samples = new float[clip.samples * clip.channels];
-        clip.GetData(samples, 0);
-        return samples;
+        AnalysisFailed = true;
+        AnalysisComplete = false;
+        StatusMessage = "Analysis failed";
+        Debug.LogError("PRISM: " + message);
     }
 
-    //Split audio into segments, calculate RMS energy for each//
-    private float[] CalculateEnergyOverTime(float[] samples, AudioClip clip)
+    private void OnDestroy()
     {
-        float[] energy = new float[SEGMENTS];
-        LowEnergyOverTime = new float[SEGMENTS];
-        MidEnergyOverTime = new float[SEGMENTS];
-        HighEnergyOverTime = new float[SEGMENTS];
-        RawLowEnergyOverTime = new float[SEGMENTS];
-        RawMidEnergyOverTime = new float[SEGMENTS];
-        RawHighEnergyOverTime = new float[SEGMENTS];
-
-        int samplesPerSegment = samples.Length / SEGMENTS;
-        int channels = clip.channels;
-        int sampleRate = clip.frequency;
-
-        float peak = 0f;
-        float total = 0f;
-
-        float rawLowTotal = 0f;
-        float rawMidTotal = 0f;
-        float rawHighTotal = 0f;
-
-        int fftSize = 4096;
-
-        //Accumulate spectrum across all segments for AverageSpectrumm..
-        float[] spectrumAccum = new float[fftSize / 2];
-
-        for (int i = 0; i < SEGMENTS; i++)
+        //Don't leave an orphaned analyser running if play mode is exited mid-analysis.//
+        if (_process != null && !_process.HasExited)
         {
-            int start = i * samplesPerSegment;
-            int end = Mathf.Min(start + samplesPerSegment, samples.Length);
-            int segLength = end - start;
-
-            float sumAll = 0f;
-            for (int j = start; j < end; ++j) sumAll += samples[j] * samples[j];
-            float rms = Mathf.Sqrt(sumAll / segLength);
-            energy[i] = rms;
-
-            float[] fftInput = new float[fftSize];
-            for (int j = 0; j < fftSize; j++)
-            {
-                int sampleIndex = start + (j * channels);
-                if (sampleIndex < samples.Length) fftInput[j] = samples[sampleIndex];
-            }
-
-            // Hanning window
-            for (int j = 0; j < fftSize; j++)
-            {
-                float window = 0.5f * (1f - Mathf.Cos(2f * Mathf.PI * j / (fftSize - 1)));
-                fftInput[j] *= window;
-            }
-
-            float[] spectrum = FFT(fftInput);
-
-            // Accumulate for average spectrum
-            for (int j = 0; j < spectrumAccum.Length; j++)
-                spectrumAccum[j] += spectrum[j];
-
-            float freqResolution = (float)sampleRate / fftSize;
-            int lowMaxBin = Mathf.RoundToInt(250f / freqResolution);
-            int midMaxBin = Mathf.RoundToInt(4000f / freqResolution);
-            int highMaxBin = Mathf.Min(Mathf.RoundToInt(20000f / freqResolution), spectrum.Length - 1);
-
-            float sumLow = 0f, sumMid = 0f, sumHigh = 0f;
-            for (int b = 1; b < lowMaxBin; b++) sumLow += spectrum[b];
-            for (int b = lowMaxBin; b < midMaxBin; b++) sumMid += spectrum[b];
-            for (int b = midMaxBin; b < highMaxBin; b++) sumHigh += spectrum[b];
-
-            float rawLow = sumLow / Mathf.Max(1, lowMaxBin - 1);
-            float rawMid = sumMid / Mathf.Max(1, midMaxBin - lowMaxBin);
-            float rawHigh = sumHigh / Mathf.Max(1, highMaxBin - midMaxBin);
-
-            RawLowEnergyOverTime[i] = rawLow;
-            RawMidEnergyOverTime[i] = rawMid;
-            RawHighEnergyOverTime[i] = rawHigh;
-
-            rawLowTotal += rawLow;
-            rawMidTotal += rawMid;
-            rawHighTotal += rawHigh;
-
-            // Perceptually scaled versions
-            LowEnergyOverTime[i] = rawLow * 3.5f;
-            MidEnergyOverTime[i] = rawMid * 1.0f;
-            HighEnergyOverTime[i] = rawHigh * 8.0f;
-
-            if (rms > peak) peak = rms;
-            total += rms;
+            try { _process.Kill(); } catch { }
         }
-
-        PeakEnergy = peak;
-        AverageEnergy = total / SEGMENTS;
-
-        RawLowAverage = rawLowTotal / SEGMENTS;
-        RawMidAverage = rawMidTotal / SEGMENTS;
-        RawHighAverage = rawHighTotal / SEGMENTS;
-
-        // Normalise accumulated spectrum to get average
-        AverageSpectrum = new float[spectrumAccum.Length];
-        for (int i = 0; i < spectrumAccum.Length; i++)
-            AverageSpectrum[i] = spectrumAccum[i] / SEGMENTS;
-
-        return energy;
-
-    }
-
-    
-    private float EstimateTempo(float[] samples, AudioClip clip)
-    {
-        //Approach Inspired by:
-        //Dixon, S. (2001) - Automatic Extraction of Tempo and Beat from Expressive Performances//
-        //McFee et al. (2015) - librosa: Audio and Music Signal Analysis in Python//
-
-        int sampleRate = clip.frequency;
-        int channels = clip.channels;
-
-        //10ms hop size//
-        int hopSize = sampleRate / 100;
-        int totalHops = samples.Length / (hopSize * channels);
-
-        //Step 1: Multi-band onset detection//
-        //Analyse bass, mid and high bands seperately//
-        //Inspired by Dixon's multi-band approach//
-        int fftSize = 1024;
-        float freqResolution = (float)sampleRate / fftSize;
-
-        int bassBin = Mathf.RoundToInt(250f / freqResolution);
-        int midBin = Mathf.RoundToInt(4000f / freqResolution);
-        int highBin = Mathf.Min(Mathf.RoundToInt(16000f / freqResolution), fftSize / 2 - 1);
-
-        float[] onsetBass = new float[totalHops];
-        float[] onsetMid = new float[totalHops];
-        float[] onsetHigh = new float[totalHops];
-
-        float[] prevBass = new float[1];
-        float[] prevMid = new float[1];
-        float[] prevHigh = new float[1];
-
-        for(int i = 0; i < totalHops; i++)
-        {
-            int start = i * hopSize * channels;
-
-            float[] fftInput = new float[fftSize];
-            for(int j = 0; j < fftSize; j++)
-            {
-                int idx = start + j * channels;
-                if (idx < samples.Length) fftInput[j] = samples[idx];
-            }
-
-            //Hanning window//
-            for(int j = 0; j < fftSize; j++)
-            {
-                float w = 0.5f * (1f - Mathf.Cos(2f * Mathf.PI * j / (fftSize - 1)));
-                fftInput[j] *= w;
-            }
-
-            float[] spectrum = FFT(fftInput);
-
-            //Sum each band//
-            float bass = 0f, mid = 0f, high = 0f;
-            for (int b = 1; b < bassBin; b++) bass += spectrum[b];
-            for (int b = bassBin; b < midBin; b++) mid += spectrum[b];
-            for (int b = midBin; b < highBin; b++) high += spectrum[b];
-
-            bass /= Mathf.Max(1, bassBin - 1);
-            mid /= Mathf.Max(1, midBin - bassBin);
-            high /= Mathf.Max(1, highBin - midBin);
-
-            //Positive flux only - onset = energy increase//
-            onsetBass[i] = Mathf.Max(0f, bass - prevBass[0]);
-            onsetMid[i] = Mathf.Max(0f, mid - prevMid[0]);
-            onsetHigh[i] = Mathf.Max(0f, high - prevHigh[0]);
-
-            prevBass[0] = bass;
-            prevMid[0] = mid;
-            prevHigh[0] = high;
-        }
-
-        //Step 2: Adaptive normalisation//
-        //Normalise each band's onset envelope against its local mean//
-        //Prevents quiet sections from being drowned out by loud ones//
-        //Inspired by Librosa's onset_strength normalisation//
-        int windowSize = 50;// 500ms local window//
-        float[] onsetCombined = new float[totalHops];
-
-        for(int i = 0; i < totalHops; i++)
-        {
-            int wStart = Mathf.Max(0, i - windowSize / 2);
-            int wEnd = Mathf.Min(totalHops, i + windowSize / 2);
-
-            float meanBass = 0f, meanMid = 0f, meanHigh = 0f;
-            int count = wEnd - wStart;
-
-            for(int w = wStart; w < wEnd; w++)
-            {
-                meanBass += onsetBass[w];
-                meanMid += onsetMid[w];
-                meanHigh += onsetHigh[w];
-            }
-
-            meanBass /= count;
-            meanMid /= count;
-            meanHigh /= count;
-
-            //Normalise against local mean, weight bass heavily - kick drives tempo//
-            float normBass = meanBass > 0 ? onsetBass[i] / meanBass : 0f;
-            float normMid = meanMid > 0 ? onsetMid[i] / meanMid : 0f;
-            float normHigh = meanHigh > 0 ? onsetHigh[i] / meanHigh : 0f;
-
-            onsetCombined[i] = normBass * 0.5f + normMid * 0.3f + normHigh * 0.2f;
-        }
-
-        //Step 3: Autocorrelation on combined onset envelope//
-        int minLag = 30; //200 BPM//
-        int maxLag = 200; //30 BPM//
-
-        float[] correlations = new float[maxLag + 1];
-
-        for(int lag = minLag; lag <= maxLag; lag++)
-        {
-            float correlation = 0f;
-            int n = 0;
-
-            for(int i = 0; i < onsetCombined.Length - lag; i++)
-            {
-                correlation += onsetCombined[i] * onsetCombined[i + lag];
-                n++;
-            }
-
-            correlations[lag] = n > 0 ? correlation / n : 0f;
-        }
-
-        //Step 4: Harmonic Scoring//
-        //A true beat period scores strongly at its multiples//
-        float bestScore = -1f;
-        int bestLag = minLag;
-
-        for(int lag = minLag; lag <= maxLag / 2; lag++)
-        {
-            float score = correlations[lag];
-            int doubleLag = lag * 2;
-            int tripleLag = lag * 3;
-
-            if (doubleLag <= maxLag) score += correlations[doubleLag] * 0.5f;
-            if (tripleLag <= maxLag) score += correlations[tripleLag] * 0.25f;
-
-            //Slight bias toward longer periods//
-            float lagBias = (float)(lag - minLag) / (maxLag / 2 - minLag);
-            score *= (1f + lagBias * 0.15f);
-
-            if(score > bestScore)
-            {
-                bestScore = score;
-                bestLag = lag;
-            }
-        }
-
-        //Step 5: Convert to BPM//
-        float periodMs = bestLag * 10f;
-        float bpm = 60000f / periodMs;
-
-        //Half tempo correction - only when result is suspiciously low and doubling lands in a realistice range//
-        float doubleBPM = bpm * 2f;
-        if (bpm < 75f && doubleBPM >= 90f && doubleBPM <= 160) bpm = doubleBPM;
-
-        return bpm;
-    }
-
-    private float[] FFT(float[] input)
-    {
-        int n = input.Length;
-        float[] real = new float[n];
-        float[] imag = new float[n];
-        float[] output = new float[n];
-
-        for(int i = 0; i < n; i++) real[i] = input[i];
-
-        //Cooley-Tukey iterative FFT//
-        int j = 0;
-        for(int i = 1; i < n; i++)
-        {
-            int bit = n >> 1;
-            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
-            j ^= bit;
-            if(i < j) { float tmp = real[i]; real[i] = real[j]; real[j] = tmp; }
-        }
-
-        for(int len = 2; len <= n; len <<=1)
-        {
-            float angle = -2f * Mathf.PI / len;
-            float wRe = Mathf.Cos(angle);
-            float wIm = Mathf.Sin(angle);
-
-            for(int i = 0; i < n; i += len)
-            {
-                float curRe = 1f, curIm = 0f;
-                for(int k = 0; k < len / 2; k++)
-                {
-                    float uRe = real[i + k];
-                    float uIm = imag[i + k];
-                    float vRe = real[i + k + len / 2] * curRe - imag[i + k + len / 2] * curIm;
-                    float vIm = real[i + k + len / 2] * curIm + imag[i + k + len / 2] * curRe;
-
-                    real[i + k] = uRe + vRe;
-                    imag[i + k] = uIm + vIm;
-                    real[i + k + len / 2] = uRe - vRe;
-                    imag[i + k + len / 2] = uIm - vIm;
-
-                    float newCurRe = curRe * wRe - curIm * wIm;
-                    curIm = curRe * wIm + curIm * wRe;
-                    curRe = newCurRe;
-                }
-            }
-        }
-
-        //Return magnitude specturm//
-        for (int i = 0; i < n / 2; i++) output[i] = Mathf.Sqrt(real[i] * real[i] + imag[i] * imag[i]);
-
-        return output;
-    }
-    private void LogResults()
-    {
-        Debug.Log("=== PRISM Analysis Results ===");
-        Debug.Log("Peak Energy: " + PeakEnergy.ToString("F4"));
-        Debug.Log("Average Energy: " + AverageEnergy.ToString("F4"));
-        Debug.Log("Estimated BPM: " + EstimatedTempo.ToString("F1"));
-        Debug.Log($"Raw Band Averages - Low: {RawLowAverage:F6} Mid: {RawMidAverage:F6} High: {RawHighAverage:F6}");
-
-        string energyMap = "";
-        for (int i = 0; i < EnergyOverTime.Length; i++)
-        {
-            float normalized = EnergyOverTime[i] / PeakEnergy;
-            if (normalized > 0.75f) energyMap += "█";
-            else if (normalized > 0.5f) energyMap += "▓";
-            else if (normalized > 0.25f) energyMap += "▒";
-            else energyMap += "░";
-        }
-        Debug.Log(energyMap);
     }
 }

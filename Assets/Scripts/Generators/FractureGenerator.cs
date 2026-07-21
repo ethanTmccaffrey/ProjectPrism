@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using UnityEditor.Analytics;
 using UnityEngine;
 
 //FracureGenerator: Luver Category 4 (Cobwebs and Radial Forms), fracture subcategory//
@@ -39,8 +38,6 @@ public class FractureGenerator : MonoBehaviour
     [Header("Shard Shape")]
     [SerializeField] private float minLength = 1.5f;
     [SerializeField] private float maxLength = 6f;
-    //Shards are thin relative to length - angular, blade-like, not chunky//
-    [SerializeField] private float thicknessRatio = 0.12f;
 
     [Header("Onset Detection (Dixon 2001)")]
     //How many recent frames of flux to avarge for the adaptive threshold//
@@ -56,12 +53,10 @@ public class FractureGenerator : MonoBehaviour
 
     //Internal state//
     private GameObject _root; //Parent for all spawned shards//
-    private SpatialGenerator _spatial; //reusued for colour + primitive helpers//
     private readonly List<float> _fluxHistory = new List<float>();
     private float _timeSinceLastShard = 0f;
     private int _shardCount = 0;
     private bool _active = false;
-    private float _debugTimer = 0f;
     private float _elapsed = 0f;
 
     //Shared material so every shard is one draw path rather than N materials//
@@ -74,8 +69,7 @@ public class FractureGenerator : MonoBehaviour
     public void Init(TimbralProfile profile)
     {
         _root = new GameObject("Fracture_Root");
-        _spatial = GetComponent<SpatialGenerator>();
-
+        if(_prism != null) _prism.RegisterGenerator(GeneratorID.Fracture);
         _fluxHistory.Clear();
         _timeSinceLastShard = 0f;
         _shardCount = 0;
@@ -96,22 +90,6 @@ public class FractureGenerator : MonoBehaviour
         //Uses raw flux so sharp beat spikes survive for detection//
         float flux = profile.RealtimeFluxRaw;
         PushFlux(flux);
-
-        //_debugTimer += Time.deltaTime;
-        //if (_debugTimer >= 1f)
-        //{
-        //    _debugTimer = 0f;
-        //    float avg = FluxAverage();
-        //    bool onset = IsOnset(flux);
-        //    Debug.Log(
-        //        $"[FRACTURE] weight={weight:F3} (need≥{activationThreshold:F2}) " +
-        //        $"active={_active} | " +
-        //        $"F={profile.RealtimeFlatness:F3} Z={profile.RealtimeZCR:F3} " +
-        //        $"fluxRaw={flux:F4} avg={avg:F4} onset={onset} " +
-        //        $"(need flux>{avg * onsetSensitivity:F4}) | " +
-        //        $"shards={_shardCount} histFill={_fluxHistory.Count}/{fluxHistorySize}"
-        //    );
-        //}
 
         if (!_active) return;
         if (_shardCount >= maxShards) return;
@@ -205,7 +183,7 @@ public class FractureGenerator : MonoBehaviour
         //Morph axis, biased by the timbral moment then spread randomly//
         //elongation: 1 = long spike, 0 = squat chunk. Roughness (Z) drives spikes//
         //flatness:   1 = flat sliver, 0 = full volume. Noise (F) drives slivers//
-        float elongation = Mathf.Clamp01(profile.RealtimeZCR + Random.Range(-0.35f, 0.35f));
+        float elongation = Mathf.Clamp01(profile.RealtimePercussiveRatio + Random.Range(-0.35f, 0.35f));
         float flatnessAxis = Mathf.Clamp01(profile.RealtimeFlatness + Random.Range(-0.35f, 0.35f));
 
         Mesh mesh = BuildShardMesh(length, elongation, flatnessAxis);
@@ -216,7 +194,8 @@ public class FractureGenerator : MonoBehaviour
         //Fracture lives at high flatness/ high centroid, so this trends bright/harsh which is correct for this character//
         //Falls back to a stark near white if the colour hook is unavailable so shards dont render invisible//
         Color c = ResolveColour(profile);
-        SpatialGenerator.ApplyColour(shard, c);
+        Renderer rend = shard.GetComponent<Renderer>();
+        if (rend != null) rend.material.color = c;
 
         _shardCount++;
     }
