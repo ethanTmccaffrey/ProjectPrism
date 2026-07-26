@@ -233,6 +233,17 @@ public class HeadField : MonoBehaviour
         March(w, verts, tris);
         KeepLargestComponent(verts, tris);
 
+        //Weld coincident vertices. The march emits three unshared vertices per triangle, so
+        //every facet edge is a seam of duplicate vertices at the same position. Under the
+        //ripple shader those duplicates can displace by fractionally different amounts and
+        //pull apart, opening thin slits that show the interior through the surface. Welding
+        //shared corners into one vertex makes them move as a unit, closing the seams.
+        //
+        //The cost is smooth normals - a welded vertex has one normal averaged across its
+        //faces, softening the planar facets. That is the trade for a surface that does not
+        //tear when displaced.
+        WeldVertices(verts, tris);
+
         if (verts.Count == 0)
         {
             Debug.LogWarning("PRISM HeadField: marching produced no geometry");
@@ -266,24 +277,46 @@ public class HeadField : MonoBehaviour
             : UnityEngine.Rendering.IndexFormat.UInt16;
         _mesh.SetVertices(verts);
         _mesh.SetTriangles(tris, 0);
-        //Flat normals, not smoothed. RecalculateNormals averages normals across shared
-        //vertices, which on a planar low-poly head smears the crisp facets into a soft
-        //blur - the model's whole character is in those planes. The march emits three
-        //unshared vertices per triangle, so a per-face normal can be assigned directly.
-        var normals = new Vector3[verts.Count];
-        for (int t = 0; t < tris.Count; t += 3)
-        {
-            Vector3 a = verts[tris[t]], b = verts[tris[t + 1]], c = verts[tris[t + 2]];
-            Vector3 n = Vector3.Cross(b - a, c - a).normalized;
-            normals[tris[t]] = n;
-            normals[tris[t + 1]] = n;
-            normals[tris[t + 2]] = n;
-        }
-        _mesh.SetNormals(normals);
+        _mesh.RecalculateNormals();
         _mesh.RecalculateBounds();
         _meshObject.GetComponent<MeshFilter>().mesh = _mesh;
 
         Debug.Log($"PRISM HeadField: rebuilt - {verts.Count} verts, {tris.Count / 3} tris");
+    }
+
+    //Merges vertices at the same position into one, so shared corners move together under
+    //displacement. Quantises positions to weld, then rebuilds the triangle list to index
+    //the merged set.
+    private void WeldVertices(List<Vector3> verts, List<int> tris)
+    {
+        if (verts.Count == 0) return;
+
+        var map = new Dictionary<Vector3Int, int>();
+        var merged = new List<Vector3>();
+        int[] remap = new int[verts.Count];
+        float weldStep = _pitch * scale * 0.05f;   //5% of a scaled voxel//
+        float q = 1f / weldStep;
+
+        for (int i = 0; i < verts.Count; i++)
+        {
+            Vector3 v = verts[i];
+            var key = new Vector3Int(Mathf.RoundToInt(v.x * q),
+                                     Mathf.RoundToInt(v.y * q),
+                                     Mathf.RoundToInt(v.z * q));
+            if (!map.TryGetValue(key, out int id))
+            {
+                id = merged.Count;
+                map[key] = id;
+                merged.Add(v);
+            }
+            remap[i] = id;
+        }
+
+        for (int t = 0; t < tris.Count; t++)
+            tris[t] = remap[tris[t]];
+
+        verts.Clear();
+        verts.AddRange(merged);
     }
 
     //Marching cubes over the field, using the shared lookup tables.//
