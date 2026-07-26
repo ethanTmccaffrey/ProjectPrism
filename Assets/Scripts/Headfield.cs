@@ -86,6 +86,8 @@ public class HeadField : MonoBehaviour
     public Bounds FieldBounds { get; private set; }
     public float ShellThickness => shellThickness;
 
+    public float VoxelWorldSize => _pitch * scale;
+
     public void SetMaterial(Material m)
     {
         headMaterial = m;

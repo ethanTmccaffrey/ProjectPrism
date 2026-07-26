@@ -157,9 +157,6 @@ public class SkullRipple : MonoBehaviour
                 sm.SetVector("_HeadCentre", centre);
                 sm.SetFloat("_RippleAmplitude", amplitude);
                 sm.SetFloat("_RippleWavelength", wavelength);
-
-                if (live)
-                    Debug.Log($"PUSH {r.name}: shader={sm.shader.name} r0={_dir[0].w:F2} amp={amplitude}");
             }
         }
     }

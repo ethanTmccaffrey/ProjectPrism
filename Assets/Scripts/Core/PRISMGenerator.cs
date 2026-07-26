@@ -271,12 +271,12 @@ public class PRISMGenerator : MonoBehaviour
             {
                 _debugTimer = 0f;
                 var p = TimbralProfile;
-                Debug.Log($"[PRISM t={_audioSource.time:F1}] " +
-                          $"F={p.RealtimeFlatness:F2} C={p.RealtimeCentroid:F2} " +
-                          $"H={p.RealtimeHarmonicComplexity:F2} " +
-                          $"E={p.RealtimeEnergy:F2} P={p.RealtimePercussiveRatio:F2} " +
-                          $"D={p.RealtimeOnsetDensity:F2} R={p.RealtimeRhythmicRegularity:F2} " +
-                          $"| dominant={_dominantId} ({_dominantWeight:F2})");
+                //Debug.Log($"[PRISM t={_audioSource.time:F1}] " +
+                //          $"F={p.RealtimeFlatness:F2} C={p.RealtimeCentroid:F2} " +
+                //          $"H={p.RealtimeHarmonicComplexity:F2} " +
+                //          $"E={p.RealtimeEnergy:F2} P={p.RealtimePercussiveRatio:F2} " +
+                //          $"D={p.RealtimeOnsetDensity:F2} R={p.RealtimeRhythmicRegularity:F2} " +
+                //          $"| dominant={_dominantId} ({_dominantWeight:F2})");
             }
         }
 
