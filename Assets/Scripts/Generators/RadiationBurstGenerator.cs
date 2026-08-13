@@ -1,21 +1,5 @@
-using System.Collections.Generic;
+ï»¿using System.Collections.Generic;
 using UnityEngine;
-
-//RadiationBurstGenerator - Kluver Category 4 (Cobwebs and Radial Forms), burst subcategory//
-
-//Fires radial explosions of ragged rays on hard transients. Each burst picks a new origin in the volume, so explosions scatter across the canvas rather than all firing from one point//
-
-//Distinct from FractureGenerator despite sharing a category: Fracture is TEXTURE (weight F*Z — noisy and rough, scattering individual shards continuously)//
-//RadiationBurst is IMPACT (weight X*Z*F — additionally requires PERCUSSIVENESS, firing radial bursts on hits). Fracture describes what the sound is like; this describes what it does//
-
-//Timbral home: percussive + rough + noisy — aggressive, hit-driven music//
-//Acoustic -> visual://
-//Burst fires on hard onsets only (selective — punctuation, not a steady stream)//
-//Ray count scales with weight (harder character = bigger explosion)//
-//Ray raggedness scales with roughness (ZCR)//
-//Ray length scales with the transient's strength//
-//Colour: RealtimeColour at burst//
-//Prominence: burst field spread + explosion scale//
 
 public class RadiationBurstGenerator : MonoBehaviour
 {
@@ -37,6 +21,7 @@ public class RadiationBurstGenerator : MonoBehaviour
 
     [Header("Placement")]
     [SerializeField] private float maxFieldOffset = 30f;
+    [SerializeField] private HeadPlacement placement;
 
     [Header("Onset Detection (Dixon 2001)")]
     [SerializeField] private int fluxHistorySize = 43;
@@ -125,9 +110,17 @@ public class RadiationBurstGenerator : MonoBehaviour
 
     private void SpawnBurst(TimbralProfile profile, float weight, Prominence pr, float strength)
     {
-        float spread = fieldRadius * Mathf.Lerp(0.35f, 1f, pr.prominence);
-        Vector3 fieldCentre = transform.position + Random.onUnitSphere * (maxFieldOffset * (1f - pr.centrality));
-        Vector3 origin = fieldCentre + Random.onUnitSphere * (spread * Mathf.Pow(Random.value, 0.333f));
+        Vector3 origin;
+        if (placement != null && placement.Ready)
+        {
+            origin = placement.RandomInEllipsoid(Mathf.Lerp(0.4f, 0.85f, pr.prominence));
+        }
+        else
+        {
+            float spread = fieldRadius * Mathf.Lerp(0.35f, 1f, pr.prominence);
+            Vector3 fieldCentre = transform.position + Random.onUnitSphere * (maxFieldOffset * (1f - pr.centrality));
+            origin = fieldCentre + Random.onUnitSphere * (spread * Mathf.Pow(Random.value, 0.333f));
+        }
 
         int rayCount = Mathf.RoundToInt(Mathf.Lerp(minRays, maxRays, weight));
 
@@ -146,16 +139,14 @@ public class RadiationBurstGenerator : MonoBehaviour
         {
             Vector3 dir = Random.onUnitSphere;
             float rayLen = length * Random.Range(0.6f, 1.3f);
-            BuildRay(burst, origin, dir, rayLen, jag, colour, sizeScale);
+            BuildRay(burst, origin, dir, rayLen, jag, colour, sizeScale, placement);
         }
 
         _burstCount++;
     }
 
-    private void BuildRay(GameObject parent, Vector3 origin, Vector3 dir, float length,
-                          float jag, Color colour, float sizeScale)
+    private void BuildRay(GameObject parent, Vector3 origin, Vector3 dir, float length, float jag, Color colour, float sizeScale, HeadPlacement placement)
     {
-        Vector3[] pts = new Vector3[raySegments + 1];
         float step = length / raySegments;
 
         Vector3 perpA = Vector3.Cross(dir, Vector3.up);
@@ -163,21 +154,28 @@ public class RadiationBurstGenerator : MonoBehaviour
         perpA.Normalize();
         Vector3 perpB = Vector3.Cross(dir, perpA).normalized;
 
+        List<Vector3> built = new List<Vector3>(raySegments + 1);
         for (int i = 0; i <= raySegments; i++)
         {
             float t = i / (float)raySegments;
             float dev = jag * step * t;
             Vector3 wobble = perpA * Random.Range(-dev, dev) + perpB * Random.Range(-dev, dev);
-            pts[i] = origin + dir * (step * i) + wobble;
+            Vector3 p = origin + dir * (step * i) + wobble;
+
+            if (i > 0 && placement != null && placement.Ready && !placement.InEllipsoid(p)) break;
+
+            built.Add(p);
         }
+
+        if (built.Count < 2) return;
 
         GameObject rayGO = new GameObject("Ray");
         rayGO.transform.SetParent(parent.transform);
         LineRenderer lr = rayGO.AddComponent<LineRenderer>();
         lr.useWorldSpace = true;
         lr.material = _lineMaterial;
-        lr.positionCount = pts.Length;
-        lr.SetPositions(pts);
+        lr.positionCount = built.Count;
+        lr.SetPositions(built.ToArray());
 
 
         float w = lineWidth * sizeScale;

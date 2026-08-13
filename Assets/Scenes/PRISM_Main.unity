@@ -261,17 +261,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
-  webRadius: 28
   minAnchors: 12
   maxAnchors: 40
   maxThreads: 250
   fallbackTrackSeconds: 180
+  crossingDistance: 3
+  maxCrossingAnchors: 40
+  crossingThreads: 40
   threadSegments: 8
   minSag: 0.5
-  maxSag: 4
-  threadWidth: 0.05
-  maxThreadSpan: 16
+  maxSag: 10
+  threadWidth: 0.25
+  webRadius: 28
   maxWebOffset: 30
+  placement: {fileID: 1373275665}
 --- !u!4 &282569661
 Transform:
   m_ObjectHideFlags: 0
@@ -887,7 +890,15 @@ MonoBehaviour:
   maxPoints: 3000
   maxCentreOffset: 40
   scale: 1
-  lineWidth: 0.15
+  placement: {fileID: 1373275665}
+  wallMargin: 6
+  seedMinDepth: 0.9
+  lineWidth: 1
+  tipWidthMultiplier: 3
+  waveAmplitude: 5
+  waveFrequency: 0.5
+  waveSpeed: 2
+  rotationSpeed: 8
 --- !u!4 &1009672859
 Transform:
   m_ObjectHideFlags: 0
@@ -1169,6 +1180,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1373275664}
   - component: {fileID: 1373275663}
+  - component: {fileID: 1373275665}
   m_Layer: 0
   m_Name: headInLayer
   m_TagString: Untagged
@@ -1189,7 +1201,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   resourceName: head_sdf
-  scale: 98
+  scale: 90
   offset: {x: 0, y: 0, z: 0}
   hollow: 1
   shellThickness: 0.18
@@ -1199,7 +1211,7 @@ MonoBehaviour:
   sphericalCut: 1
   cutSphereCentre: {x: 0.4, y: 0.3, z: 0.6}
   cutSphereRadius: 1.2
-  headMaterial: {fileID: 2100000, guid: 34e436812ae07204e84f70632de213fd, type: 2}
+  headMaterial: {fileID: 2100000, guid: 0cfb02675feec3e4184fa6cb5c48f0c0, type: 2}
   generateOnStart: 1
 --- !u!4 &1373275664
 Transform:
@@ -1216,6 +1228,25 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: -90, y: 0, z: 180}
+--- !u!114 &1373275665
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1373275661}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 19818cc4165b4d548bd3d8883f161e48, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  field: {fileID: 1373275663}
+  probeResolution: 24
+  fitFactor: 0.72
+  axisFit: {x: 1.5, y: 1.25, z: 1}
+  centreOffset: {x: 0, y: 40, z: 15}
+  showEllipsoid: 0
+  ellipsoidColour: {r: 1, g: 0, b: 1, a: 0.5}
 --- !u!1 &1412442018
 GameObject:
   m_ObjectHideFlags: 0
@@ -1251,6 +1282,7 @@ MonoBehaviour:
   maxFieldOffset: 30
   maxColonies: 8
   maxConcurrent: 2
+  placement: {fileID: 1373275665}
   minBlobs: 5
   maxBlobs: 26
   budDistance: 1.4
@@ -1370,11 +1402,12 @@ MonoBehaviour:
   maxTendrils: 400
   weightThreshold: 0.15
   pointCount: 48
-  tendrilLength: 70
-  tendrilWidth: 3
-  branchChance: 0.3
+  tendrilLength: 140
+  tendrilWidth: 6
+  branchChance: 0.9
   fadeTime: 300
   minOpacity: 0.15
+  placement: {fileID: 1373275665}
 --- !u!4 &1606740828
 Transform:
   m_ObjectHideFlags: 0
@@ -1603,6 +1636,7 @@ MonoBehaviour:
   raggedness: 0.35
   lineWidth: 0.08
   maxFieldOffset: 30
+  placement: {fileID: 1373275665}
   fluxHistorySize: 43
   onsetSensitivity: 2.2
   refractorySeconds: 0.35
@@ -1631,7 +1665,6 @@ GameObject:
   m_Component:
   - component: {fileID: 1859146415}
   - component: {fileID: 1859146414}
-  - component: {fileID: 1859146413}
   - component: {fileID: 1859146416}
   m_Layer: 0
   m_Name: HeadOutLayer
@@ -1640,22 +1673,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1859146413
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1859146412}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 789d7e5cda9fd154d86cdbf74026e0eb, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  finish: 1
-  tint: {r: 0.81960785, g: 0.8, b: 0.7607843, a: 1}
-  alpha: 1
-  unlit: 0
 --- !u!114 &1859146414
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1679,7 +1696,7 @@ MonoBehaviour:
   sphericalCut: 1
   cutSphereCentre: {x: 0.4, y: 0.3, z: 0.6}
   cutSphereRadius: 1.2
-  headMaterial: {fileID: 2100000, guid: 0aaef3c0bc048f94d948254c5880613d, type: 2}
+  headMaterial: {fileID: 2100000, guid: 76b13ec6308ec4e4585b7e974af0900b, type: 2}
   generateOnStart: 1
 --- !u!4 &1859146415
 Transform:
@@ -1709,13 +1726,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   head: {fileID: 1859146414}
+  prism: {fileID: 1200915372}
   targetObjects:
   - {fileID: 1859146412}
   - {fileID: 1373275661}
-  sweepSeconds: 0.4
-  lifetime: 0.8
-  amplitude: 0.4
-  wavelength: 0.9
+  sweepSeconds: 3
+  lifetime: 6
+  amplitude: 5
+  wavelength: 0.7
   leftOrigin: {x: -1, y: 0.1, z: 0.15}
   rightOrigin: {x: 1, y: 0.1, z: 0.15}
   energyThreshold: 0.05
@@ -1809,23 +1827,30 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
   energyThreshold: 0.03
-  scatterRadius: 40
+  scatterRadius: 30
   maxFieldOffset: 30
-  maxFields: 18
-  maxConcurrent: 6
-  minFieldRadius: 18
-  maxFieldRadius: 50
+  maxFields: 6
+  maxConcurrent: 2
+  placement: {fileID: 1373275665}
+  seedMinDepth: 0.9
+  minFieldRadius: 80
+  maxFieldRadius: 180
   heightRatio: 0.55
-  minArcs: 60
-  maxArcs: 300
-  expansionSeconds: 20
-  minArcSweep: 22
-  maxArcSweep: 67
-  arcSegments: 14
-  lineWidth: 0.1
+  minArcs: 300
+  maxArcs: 2000
+  expansionSeconds: 14
+  minArcSweep: 18
+  maxArcSweep: 55
+  arcSegments: 7
+  lineWidth: 0.7
   maxMisalignmentDeg: 45
   growthRate: 22
   opacity: 0.8
+  bandCount: 4
+  snapDegrees: 22
+  outerSnapInterval: 1.4
+  innerTickSpeedup: 0.6
+  snapEaseSpeed: 14
 --- !u!4 &2097478873
 Transform:
   m_ObjectHideFlags: 0

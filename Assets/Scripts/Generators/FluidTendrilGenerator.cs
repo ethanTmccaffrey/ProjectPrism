@@ -1,26 +1,17 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
-
-//FluidTendrilGenerator - Category 6: Wavy lines and Amorphous froms//
-//Activates on low spectral organic curves that grow and branch across the scene, persisting permantley as geometry on the canvas//
-
-//Timbral profile: Classical strings, ambient, slow soul, folk, acoustic instruments//
-//Grounded in cross-modal correspondance: smooth tonal sounds consistently map to flowing curved visual forms. (Cytowic 2002, Marks 1974, Takete/Malum: Kohler 1929)//
-
-//Mark generation: sustained energy above threshold triggers a new tendril every//
-//spawnInterval seconds. Unlike percussion-triggered generators, FluidTendril responds to sustained musical passages rather than sharp//
 
 public class FluidTendrilGenerator : MonoBehaviour
 {
     [Header("Spawn Settings")]
     [SerializeField] private float spawnInterval = 2.5f; 
-    [SerializeField] private float spawnRadius = 80f; 
+    [SerializeField] private float spawnRadius = 80f;
     [SerializeField] private float energyThreshold = 0.001f; 
-    [SerializeField] private int maxTendrils = 400; 
+    [SerializeField] private int maxTendrils = 400;
     [SerializeField] private float weightThreshold = 0.15f; 
 
     [Header("Tendril Shape")]
-    [SerializeField] private int pointCount = 48; 
+    [SerializeField] private int pointCount = 48;
     [SerializeField] private float tendrilLength = 60f; 
     [SerializeField] private float tendrilWidth = 3f; 
     [SerializeField] private float branchChance = 0.3f; 
@@ -32,11 +23,9 @@ public class FluidTendrilGenerator : MonoBehaviour
     [Header("Head Placement")]
     [SerializeField] private HeadPlacement placement;
 
-    //Mark tracking//
     private List<MarkData> _marks = new List<MarkData>();
     private Material _material;
 
-    //Timing//
     private float _spawnTimer = 0f;
     private bool _active = false;
 
@@ -99,7 +88,6 @@ public class FluidTendrilGenerator : MonoBehaviour
         }
         else
         {
-
             _spawnTimer = Mathf.Max(_spawnTimer - Time.deltaTime * 0.1f, 0f);
         }
 
@@ -115,7 +103,6 @@ public class FluidTendrilGenerator : MonoBehaviour
     {
         if (_marks.Count >= maxTendrils)
         {
-            //Cull oldest mark//
             if (_marks[0].go != null) Destroy(_marks[0].go);
             _marks.RemoveAt(0);
         }
@@ -127,7 +114,7 @@ public class FluidTendrilGenerator : MonoBehaviour
         Vector3 origin;
         if (placement != null && placement.Ready)
         {
-            origin = placement.RandomPointInCavity(pr.prominence, pr.centrality);
+            origin = placement.RandomInEllipsoid(Mathf.Lerp(0.5f, 0.95f, pr.prominence));
         }
         else
         {
@@ -135,7 +122,6 @@ public class FluidTendrilGenerator : MonoBehaviour
             Vector3 fieldCentre = transform.position + Random.onUnitSphere * (spawnRadius * (1f - pr.centrality));
             origin = fieldCentre + new Vector3(Random.Range(-area, area), Random.Range(-area * 0.4f, area * 0.4f), Random.Range(-area * 0.6f, area * 0.6f));
         }
-
 
         Vector3 baseDir = new Vector3(Random.Range(-0.4f, 0.4f), Mathf.Lerp(-0.3f, 0.5f, centroid), Random.Range(-0.3f, 0.3f)).normalized; 
 
@@ -232,7 +218,7 @@ public class FluidTendrilGenerator : MonoBehaviour
         float noiseSeed = Random.Range(0f, 100f);
         float noiseScale = Mathf.Lerp(0.8f, 3f, turbulence);
 
-        float curveMarginField = 0.35f;
+        float curveMarginDepth = 0.15f;
 
         Vector3 currentPos = origin;
         Vector3 currentDir = direction;
@@ -256,19 +242,21 @@ public class FluidTendrilGenerator : MonoBehaviour
 
             if (placement != null && placement.Ready)
             {
-                float dist = placement.DistanceInside(currentPos);
-                if (dist < curveMarginField)
+                float depth = placement.EllipsoidDepth(currentPos);
+                if (depth < curveMarginDepth)
                 {
-                    Vector3 outward = placement.SampleNormal(currentPos);
-                    if (outward != Vector3.zero)
-                    {
-                        float strength = Mathf.Clamp01(1f - dist / curveMarginField) * 0.5f;
-                        currentDir = Vector3.Slerp(currentDir, -outward, strength).normalized;
-                    }
+                    Vector3 outward = placement.EllipsoidNormal(currentPos);
+                    float strength = Mathf.Clamp01(1f - depth / curveMarginDepth) * 0.5f;
+                    currentDir = Vector3.Slerp(currentDir, -outward, strength).normalized;
                 }
             }
 
             currentPos += currentDir * stepLength;
+
+            if (placement != null && placement.Ready)
+            {
+                currentPos = placement.ClampToEllipsoid(currentPos);
+            }
         }
 
         return points;
@@ -279,7 +267,6 @@ public class FluidTendrilGenerator : MonoBehaviour
     {
         int n = curvePoints.Length;
 
-        //Validate all curve points before building mesh//
         for (int i = 0; i < n; i++)
         {
             if (float.IsNaN(curvePoints[i].x) || float.IsNaN(curvePoints[i].y) || float.IsNaN(curvePoints[i].z))
