@@ -1,38 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-//ReduplicationGenerator - Kluver Category 3 (Lattices, Honeycombs, Gratings), reduplication subcategory//
-
-//Stamps a single simple MOTIF over and over in a straight rank - one copy per beat, each
-//slightly larger, rotated and dimmer than the last. The repetition IS the form: not a
-//structure built from repeating parts, but one shape recurring, a visual echo.
-//
-//The fourth expression of Category 3, and distinct from the other three by WHAT REPEATS:
-//  Honeycomb   - cells tessellate, sharing edges, building a continuous sheet//
-//  GridGrating - frames nest, each stepping outward beyond the last//
-//  Filigree    - tracery subdivides, each generation finer than the one before//
-//  Reduplication - ONE motif recurs unchanged in series, stamped again and again//
-//The first three build something from repetition. This one presents repetition itself.
-//
-//Timbral home (weight = R * R * tF): metronomic and clean. The regularity term is SQUARED,
-//so it only fires when the pulse is genuinely locked rather than merely steady - tight
-//electronic programming, precise sequencing. That is the honest mapping: a visual stutter
-//for music that repeats itself exactly.
-//
-//BEAT-DRIVEN VIA THE ANALYSED TIMELINE. This generator stamps on profile.BeatThisFrame -
-//the beat timestamps tracked offline by librosa (Ellis 2007) - rather than running its own
-//adaptive flux threshold like the older generators do. One source of truth: every stamp
-//lands on the same beat the analyser found, not on a per-generator guess about what a beat
-//is.
-//
-//Acoustic -> visual:
-//  A copy stamped per tracked beat, so the visual repetition matches the rhythmic one//
-//  Motif shape: chosen per rank (triangle/square/pentagon/hexagon), then held for the//
-//    whole series - repetition reads within a rank, variety across the canvas//
-//  Rank direction and length: seeded per rank, scaled by prominence//
-//  Progression: each copy larger, rotated and dimmer, so the series has direction//
-//  Colour: RealtimeColour when the rank is born, fading along the series//
-
 public class ReduplicationGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -41,29 +9,23 @@ public class ReduplicationGenerator : MonoBehaviour
     [Header("Field")]
     [SerializeField] private float fieldRadius = 28f;
     [SerializeField] private float maxFieldOffset = 30f;
-    //Hard ceiling on total ranks. Prominence scales how many actually appear.//
-    [SerializeField] private int maxRanks = 14;
+    [SerializeField] private HeadPlacement placement;
+    [SerializeField] private float launchOffset = 4f;
+    [SerializeField] private int maxRanks = 40;
 
     [Header("Rank")]
-    //Copies in a completed rank. Prominence interpolates between these.//
     [SerializeField] private int minCopies = 4;
     [SerializeField] private int maxCopies = 12;
-    //World distance between successive stamps along the rank.//
     [SerializeField] private float baseSpacing = 3.2f;
-    //Spacing grows slightly along the rank so the series opens out.//
     [SerializeField, Range(1f, 1.4f)] private float spacingGrowth = 1.06f;
 
     [Header("Motif")]
-    //Simple outlined polygons - the shape is picked per rank then held.//
     [SerializeField] private float baseSize = 1.6f;
-    //Each copy is this much larger than the last.//
     [SerializeField, Range(1f, 1.5f)] private float sizeGrowth = 1.12f;
-    //Each copy rotates this much further, so the series twists.//
     [SerializeField] private float rotationStep = 14f;
-    [SerializeField] private float lineWidth = 0.09f;
+    [SerializeField] private float lineWidth = 0.18f;
 
     [Header("Fade")]
-    //Opacity of the first copy, and of the last. The series dims along its length.//
     [SerializeField, Range(0f, 1f)] private float startOpacity = 0.95f;
     [SerializeField, Range(0f, 1f)] private float endOpacity = 0.25f;
 
@@ -72,22 +34,21 @@ public class ReduplicationGenerator : MonoBehaviour
     private Material _lineMaterial;
 
     private bool _active = false;
-    private float _debugTimer = 0f;
     private int _rankCount = 0;
 
-    //The rank currently being stamped. Completed ranks persist and are dropped.//
-    private Rank _current = null;
+    private readonly List<Rank> _growing = new List<Rank>();
+    [SerializeField] private int maxConcurrentRanks = 3;
 
     private class Rank
     {
         public Vector3 origin;
-        public Vector3 direction;     //rank runs along this axis//
-        public Quaternion motifPlane; //orientation the motif is drawn in//
-        public int sides;             //3=triangle, 4=square, 5=pentagon, 6=hexagon//
+        public Vector3 direction;   
+        public Quaternion motifPlane; 
+        public int sides;             
         public int targetCopies;
         public int stamped;
         public float sizeScale;
-        public float distance;        //accumulated distance along the rank//
+        public float distance;       
         public float spacing;
         public Color colour;
     }
@@ -108,7 +69,7 @@ public class ReduplicationGenerator : MonoBehaviour
 
         _active = false;
         _rankCount = 0;
-        _current = null;
+        _growing.Clear();
 
         Debug.Log("PRISM ReduplicationGenerator: Initialised");
     }
@@ -122,25 +83,24 @@ public class ReduplicationGenerator : MonoBehaviour
 
         if (!_active) return;
 
-        int effectiveMax = Mathf.Max(1, Mathf.RoundToInt(maxRanks * pr.prominence * pr.prominence));
-        if (_rankCount >= effectiveMax && _current == null) return;
+        int effectiveMax = Mathf.Max(1, Mathf.RoundToInt(maxRanks * Mathf.Lerp(0.3f, 1f, pr.prominence)));
 
-        //One stamp per tracked beat. Using the analysed beat timeline rather than a local
-        //onset detector means every generator agrees on where the beats are.
         if (!profile.BeatThisFrame) return;
 
-        if (_current == null)
+        for (int i = _growing.Count - 1; i >= 0; i--)
         {
-            if (_rankCount >= effectiveMax) return;
-            _current = SeedRank(profile, pr);
+            StampCopy(_growing[i]);
+            if (_growing[i].stamped >= _growing[i].targetCopies)
+            {
+                _rankCount++;
+                _growing.RemoveAt(i);   
+            }
         }
-
-        StampCopy(_current);
-
-        if (_current.stamped >= _current.targetCopies)
+        int started = _rankCount + _growing.Count;
+        while (_growing.Count < maxConcurrentRanks && started < effectiveMax)
         {
-            _rankCount++;
-            _current = null;   //completed rank persists; next beat starts a new one//
+            _growing.Add(SeedRank(profile, pr));
+            started++;
         }
     }
 
@@ -151,16 +111,36 @@ public class ReduplicationGenerator : MonoBehaviour
 
     private Rank SeedRank(TimbralProfile profile, Prominence pr)
     {
-        float spread = fieldRadius * Mathf.Lerp(0.4f, 1f, pr.prominence);
-        Vector3 fieldCentre = transform.position + Random.onUnitSphere * (maxFieldOffset * (1f - pr.centrality));
-
         var r = new Rank();
-        r.origin = fieldCentre + Random.onUnitSphere * (spread * Mathf.Pow(Random.value, 0.5f));
-        r.direction = Random.onUnitSphere;
-        //The motif sits in a plane facing along the rank, so copies read as a receding
-        //series rather than edge-on slivers.
+        bool placed = false;
+        if (placement != null && placement.HasSkullMesh)
+        {
+            Vector3 bestSp = Vector3.zero, bestSn = Vector3.up;
+            float bestDist = -1f;
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                if (!placement.RandomSkullMeshPoint(out Vector3 s, out Vector3 n)) break;
+                float dist = (s - placement.CavityCentre).magnitude;
+                if (dist > bestDist) { bestDist = dist; bestSp = s; bestSn = n; }
+            }
+            if (bestDist > 0f)
+            {
+                Vector3 outFromCentre = (bestSp - placement.CavityCentre).normalized;
+                Vector3 dir = bestSn.normalized;
+                if (Vector3.Dot(dir, outFromCentre) < 0f) dir = -dir;
+                if (Vector3.Dot(dir, outFromCentre) < 0.3f) dir = outFromCentre;
+                r.direction = dir;
+                r.origin = bestSp + r.direction * launchOffset;
+                placed = true;
+            }
+        }
+        if (!placed)
+        {
+            r.direction = Random.onUnitSphere;
+            r.origin = transform.position + r.direction * launchOffset;
+        }
         r.motifPlane = Quaternion.LookRotation(r.direction, Random.onUnitSphere);
-        r.sides = Random.Range(3, 7);   //triangle through hexagon//
+        r.sides = Random.Range(3, 7); 
         r.targetCopies = Mathf.RoundToInt(Mathf.Lerp(minCopies, maxCopies, pr.prominence));
         r.sizeScale = Mathf.Lerp(0.6f, 1.2f, pr.prominence);
         r.stamped = 0;
@@ -172,18 +152,16 @@ public class ReduplicationGenerator : MonoBehaviour
 
     private void StampCopy(Rank r)
     {
-        //Progression along the series: each copy larger, further rotated, dimmer.//
         int i = r.stamped;
         float size = baseSize * r.sizeScale * Mathf.Pow(sizeGrowth, i);
         float roll = rotationStep * i;
 
         Vector3 centre = r.origin + r.direction * r.distance;
 
-        //Advance for the next copy, with spacing opening out slightly.//
+
         r.distance += r.spacing;
         r.spacing *= spacingGrowth;
 
-        //Fade along the series so it reads as a sequence with direction.//
         float t = r.targetCopies > 1 ? i / (float)(r.targetCopies - 1) : 0f;
         Color c = r.colour;
         c.a = Mathf.Lerp(startOpacity, endOpacity, t);
@@ -192,14 +170,11 @@ public class ReduplicationGenerator : MonoBehaviour
         r.stamped++;
     }
 
-    //A single outlined regular polygon, drawn as a closed LineRenderer.//
-    private void BuildPolygon(Vector3 centre, Quaternion plane, float rollDeg,
-                              int sides, float size, Color colour, float sizeScale)
+    private void BuildPolygon(Vector3 centre, Quaternion plane, float rollDeg, int sides, float size, Color colour, float sizeScale)
     {
         var go = new GameObject("Motif");
         go.transform.SetParent(_root.transform);
 
-        //Roll the motif within its own plane so successive copies twist.//
         Quaternion rot = plane * Quaternion.AngleAxis(rollDeg, Vector3.forward);
 
         Vector3[] pts = new Vector3[sides];
@@ -212,7 +187,7 @@ public class ReduplicationGenerator : MonoBehaviour
 
         var lr = go.AddComponent<LineRenderer>();
         lr.useWorldSpace = true;
-        lr.loop = true;              //closed outline//
+        lr.loop = true;              
         lr.material = _lineMaterial;
         lr.positionCount = sides;
         lr.SetPositions(pts);
@@ -220,7 +195,7 @@ public class ReduplicationGenerator : MonoBehaviour
         float w = lineWidth * sizeScale;
         lr.startWidth = w;
         lr.endWidth = w;
-        lr.numCornerVertices = 0;    //crisp corners - these are hard geometric stamps//
+        lr.numCornerVertices = 0;    
         lr.numCapVertices = 0;
         lr.startColor = colour;
         lr.endColor = colour;

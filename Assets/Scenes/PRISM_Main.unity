@@ -206,16 +206,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
-  rippleRate: 0.8
+  rippleRate: 0.5
   maxRings: 150
-  minFinalRadius: 12
-  maxFinalRadius: 120
-  minExpandSpeed: 1
-  maxExpandSpeed: 10
-  ringSegments: 48
-  minThickness: 0.06
-  maxThickness: 0.5
-  maxCentreOffset: 15
+  minFinalAngle: 0.25
+  maxFinalAngle: 1.6
+  minExpandSpeed: 0.15
+  maxExpandSpeed: 0.5
+  ringSegments: 64
+  minThickness: 0.2
+  maxThickness: 1.2
+  placement: {fileID: 1373275665}
+  skullRipple: {fileID: 1859146416}
+  skullTintMute: 1
+  maxCentreOffset: 30
 --- !u!4 &65341127
 Transform:
   m_ObjectHideFlags: 0
@@ -594,13 +597,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
-  baseStep: 2.2
-  maxFrames: 60
-  innerSize: 2
-  lineWidth: 0.08
-  minAspect: 1
-  maxAspect: 2.4
-  maxPanelOffset: 30
+  bandStep: 6
+  maxBands: 40
+  placement: {fileID: 1373275665}
+  bandRadius: 1
+  paintStrength: 1
   fluxHistorySize: 43
   onsetSensitivity: 1.5
   refractorySeconds: 0.2
@@ -825,15 +826,16 @@ MonoBehaviour:
   fieldRadius: 60
   maxStrokes: 50
   maxFieldOffset: 30
-  minStrokeLength: 20
-  maxStrokeLength: 60
+  placement: {fileID: 1373275665}
+  minStrokeLength: 60
+  maxStrokeLength: 180
   growthRate: 7
   stepDistance: 0.6
   maxConcurrent: 2
   wanderScale: 0.12
   wanderStrength: 0.25
-  minBristles: 8
-  maxBristles: 14
+  minBristles: 14
+  maxBristles: 36
   brushWidth: 0.9
   bristleWidth: 0.09
   strokeOpacity: 0.55
@@ -990,12 +992,11 @@ MonoBehaviour:
   activationThreshold: 0.15
   cellSize: 4
   maxCells: 200
-  maxSeedOffset: 35
   fallbackTrackSeconds: 180
-  domeHeight: 8
-  domeRadius: 60
-  edgeWidth: 0.12
-  fillOpacity: 0.12
+  placement: {fileID: 1373275665}
+  paintRadius: 0.4
+  paintSpacing: 0.3
+  paintStrength: 1
   fluxHistorySize: 43
   onsetSensitivity: 1.8
   refractorySeconds: 0.4
@@ -1045,10 +1046,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
   fieldRadius: 80
-  maxSpecks: 400
-  speckSize: 0.35
+  maxSpecks: 1600
+  speckSize: 0.75
   spawnRate: 6
   maxFieldOffset: 30
+  placement: {fileID: 1373275665}
 --- !u!4 &1194866156
 Transform:
   m_ObjectHideFlags: 0
@@ -1096,7 +1098,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   useDynamicPath: 0
-  inspectorClip: {fileID: 8300000, guid: ad0dd4190235f774e85874620976ab40, type: 3}
+  inspectorClip: {fileID: 8300000, guid: 75c09b31afd22d14c8089ff86e4ec1db, type: 3}
   filePath: C:\Users\ethan\Downloads\Ghost.mp3
   analyser: {fileID: 0}
   prism: {fileID: 0}
@@ -1213,6 +1215,7 @@ MonoBehaviour:
   cutSphereRadius: 1.2
   headMaterial: {fileID: 2100000, guid: 0cfb02675feec3e4184fa6cb5c48f0c0, type: 2}
   generateOnStart: 1
+  wireframe: 0
 --- !u!4 &1373275664
 Transform:
   m_ObjectHideFlags: 0
@@ -1241,6 +1244,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   field: {fileID: 1373275663}
+  outerField: {fileID: 1859146414}
   probeResolution: 24
   fitFactor: 0.72
   axisFit: {x: 1.5, y: 1.25, z: 1}
@@ -1698,6 +1702,7 @@ MonoBehaviour:
   cutSphereRadius: 1.2
   headMaterial: {fileID: 2100000, guid: 76b13ec6308ec4e4585b7e974af0900b, type: 2}
   generateOnStart: 1
+  wireframe: 0
 --- !u!4 &1859146415
 Transform:
   m_ObjectHideFlags: 0
@@ -1770,17 +1775,20 @@ MonoBehaviour:
   activationThreshold: 0.15
   fieldRadius: 60
   maxFieldOffset: 30
-  maxRanks: 14
-  minCopies: 8
+  placement: {fileID: 1373275665}
+  launchOffset: 4
+  maxRanks: 50
+  minCopies: 14
   maxCopies: 28
-  baseSpacing: 3.2
+  baseSpacing: 4
   spacingGrowth: 1.06
   baseSize: 2.5
   sizeGrowth: 1.12
   rotationStep: 14
-  lineWidth: 0.09
+  lineWidth: 2
   startOpacity: 0.95
   endOpacity: 0.25
+  maxConcurrentRanks: 10
 --- !u!4 &1972970422
 Transform:
   m_ObjectHideFlags: 0

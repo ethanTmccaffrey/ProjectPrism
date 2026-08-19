@@ -2,41 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-//HeadField - the head as a signed distance field, meshed at runtime.
-//
-//PRISM's canvas is a head. Not decoration: Kluver's form constants are ENTOPTIC phenomena,
-//seen inside the visual system with the eyes closed, and cross-modal correspondence is a
-//property of neural processing. The head is the literal site of what is being visualised.
-//It is also the FRAME - the equivalent of the rectangle a synaesthetic painting is painted
-//on, the boundary that makes the work legible as composition rather than as scatter.
-//
-//WHAT THIS DOES, in order:
-//    1. load the baked skull field
-//    2. hollow it        -> wall + cranial cavity
-//    3. cut it open      -> the interior becomes visible
-//    4. mesh and render with a single material
-//
-//Step order matters and is not obvious. Hollowing wraps a wall around whatever form it
-//receives, so it must happen BEFORE cutting: cut first and the hollow wraps the walls of
-//the cut itself, producing a lined pocket - a sphere with its own shell - rather than an
-//opening.
-//
-//WHY A DISTANCE FIELD AND NOT A MESH. Fields can be hollowed, cut, displaced and queried
-//from one representation. The query matters most: the sign of a sample answers "is this
-//point inside the skull", which is what the generator placement system is built on.
-//
-//WHY NOT A VOXEL FILL. Voxelising the source mesh and flood filling from outside does not
-//work on a head. The model is open at the mouth, both ear canals, both eye sockets and the
-//neck - correct anatomy, but far too open to seal. Every attempt leaked out through the
-//eye sockets and reported an interior volume of exactly zero, at every resolution, with
-//and without morphological closing. Signed distance via the generalized winding number
-//ignores holes entirely and recovered the volume to within 0.03%.
-//
-//SCALE. The baked head measures roughly 2.9 x 4.0 x 4.8 field units, centred near the
-//origin. Cut radii much above 1.0 swallow the whole side of the skull rather than opening
-//a window in it - the defaults here were measured against the field, not guessed.
-//
-//Head mesh: "Planar head (Oleg Toropygin)" by BlueHorse (https://skfb.ly/6yCE7), CC-BY 4.0.
+//Head mesh: "Planar head (Oleg Toropygin)" by BlueHorse (https://skfb.ly/6yCE7), CC-BY 4.0.//
 
 public class HeadField : MonoBehaviour
 {
@@ -48,30 +14,23 @@ public class HeadField : MonoBehaviour
     [SerializeField] private Vector3 offset = Vector3.zero;
 
     [Header("Hollow")]
-    //A distance field describes a FILLED volume, so an unmodified field cut open reveals a
-    //solid block. Eroding inward and subtracting leaves a wall with a genuine cavity - and
-    //that cavity is where the interior generators will live.
     [SerializeField] private bool hollow = true;
     [SerializeField] private float shellThickness = 0.18f;
 
     [Header("Cutaway - Plane")]
-    //Slices with a half-space. The normal points toward the half REMOVED; offset slides
-    //the plane, with 0 cutting through the midline.
     [SerializeField] private bool cutaway = false;
     [SerializeField] private Vector3 cutNormal = Vector3.right;
     [SerializeField] private float cutOffset = 0f;
 
     [Header("Cutaway - Sphere")]
-    //Carves a rounded bite rather than slicing flat, so the interior reads as a bowl you
-    //look into rather than a sawn face you look at.
     [SerializeField] private bool sphericalCut = true;
     [SerializeField] private Vector3 cutSphereCentre = new Vector3(0.4f, 0.3f, 0.6f);
     [SerializeField] private float cutSphereRadius = 1.2f;
 
     [Header("Rendering")]
-    //Leave empty and a plain lit material is created automatically.//
     [SerializeField] private Material headMaterial;
     [SerializeField] private bool generateOnStart = true;
+    [SerializeField] private bool wireframe = false;
 
     private float[] _field;
     private int _nx, _ny, _nz;
@@ -81,12 +40,87 @@ public class HeadField : MonoBehaviour
 
     private GameObject _meshObject;
     private Mesh _mesh;
+    private Color[] _paint;
 
     public bool Loaded => _loaded;
     public Bounds FieldBounds { get; private set; }
     public float ShellThickness => shellThickness;
 
     public float VoxelWorldSize => _pitch * scale;
+    public bool HasMesh => _mesh != null && _mesh.vertexCount > 0;
+
+    public bool RandomSurfacePoint(out Vector3 point, out Vector3 normal)
+    {
+        point = Vector3.zero; normal = Vector3.up;
+        if (!HasMesh) return false;
+        var verts = _mesh.vertices;
+        var norms = _mesh.normals;
+        int i = UnityEngine.Random.Range(0, verts.Length);
+        point = verts[i];
+        normal = (norms != null && norms.Length == verts.Length) ? norms[i].normalized : Vector3.up;
+        return true;
+    }
+
+    public bool NearestSurfacePoint(Vector3 world, out Vector3 point, out Vector3 normal)
+    {
+        point = world; normal = Vector3.up;
+        if (!HasMesh) return false;
+        var verts = _mesh.vertices;
+        var norms = _mesh.normals;
+        float best = float.MaxValue; int bestI = -1;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            float d = (verts[i] - world).sqrMagnitude;
+            if (d < best) { best = d; bestI = i; }
+        }
+        if (bestI < 0) return false;
+        point = verts[bestI];
+        normal = (norms != null && norms.Length == verts.Length) ? norms[bestI].normalized : Vector3.up;
+        return true;
+    }
+
+    public void PaintSphere(Vector3 centre, float worldRadius, Color colour, float strength)
+    {
+        if (_paint == null || _mesh == null) return;
+        var verts = _mesh.vertices;
+        float r2 = worldRadius * worldRadius;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            if ((verts[i] - centre).sqrMagnitude <= r2)
+            {
+                if (strength >= _paint[i].a)
+                    _paint[i] = new Color(colour.r, colour.g, colour.b, Mathf.Clamp01(strength));
+            }
+        }
+    }
+    public void PaintPlane(Vector3 planePoint, Vector3 planeNormal, float worldHalfThickness, Color colour, float strength)
+    {
+        if (_paint == null || _mesh == null) return;
+        Vector3 n = planeNormal.normalized;
+        var verts = _mesh.vertices;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            float signedDist = Vector3.Dot(verts[i] - planePoint, n);
+            if (Mathf.Abs(signedDist) <= worldHalfThickness)
+            {
+                if (strength >= _paint[i].a)
+                    _paint[i] = new Color(colour.r, colour.g, colour.b, Mathf.Clamp01(strength));
+            }
+        }
+    }
+
+    public void ApplyPaint()
+    {
+        if (_paint == null || _mesh == null) return;
+        _mesh.colors = _paint;
+    }
+
+    public void ClearPaint()
+    {
+        if (_paint == null) return;
+        for (int i = 0; i < _paint.Length; i++) _paint[i] = new Color(0f, 0f, 0f, 0f);
+        ApplyPaint();
+    }
 
     public void SetMaterial(Material m)
     {
@@ -103,15 +137,12 @@ public class HeadField : MonoBehaviour
         if (generateOnStart && Load()) Rebuild();
     }
 
-    //Loading//
-
     public bool Load()
     {
         TextAsset asset = Resources.Load<TextAsset>(resourceName);
         if (asset == null)
         {
-            Debug.LogError($"PRISM HeadField: could not find '{resourceName}' in Resources. " +
-                           "Run bake_head_sdf.py and place the .bytes file in Assets/Resources.");
+            Debug.LogError($"PRISM HeadField: could not find '{resourceName}' in Resources. " + "Run bake_head_sdf.py and place the .bytes file in Assets/Resources.");
             return false;
         }
 
@@ -136,9 +167,7 @@ public class HeadField : MonoBehaviour
         _ny = BitConverter.ToInt32(bytes, p); p += 4;
         _nz = BitConverter.ToInt32(bytes, p); p += 4;
 
-        _origin = new Vector3(BitConverter.ToSingle(bytes, p),
-                              BitConverter.ToSingle(bytes, p + 4),
-                              BitConverter.ToSingle(bytes, p + 8));
+        _origin = new Vector3(BitConverter.ToSingle(bytes, p),BitConverter.ToSingle(bytes, p + 4), BitConverter.ToSingle(bytes, p + 8));
         p += 12;
 
         _pitch = BitConverter.ToSingle(bytes, p); p += 4;
@@ -161,9 +190,6 @@ public class HeadField : MonoBehaviour
         return true;
     }
 
-    //Sampling - the containment tests the placement system will use//
-
-    //Signed distance at a world position. Positive = inside the head.//
     public float SampleWorld(Vector3 worldPos)
     {
         if (!_loaded) return -1f;
@@ -192,7 +218,25 @@ public class HeadField : MonoBehaviour
     public Vector3 LocalToWorld(Vector3 local) => transform.position + offset + local * scale;
     public Vector3 WorldToLocal(Vector3 world) => (world - transform.position - offset) / scale;
 
-    //Build//
+    private void Update()
+    {
+        if (!wireframe || _mesh == null) return;
+        DrawWireframe();
+    }
+
+    private void DrawWireframe()
+    {
+        var v = _mesh.vertices;
+        var t = _mesh.triangles;
+        Color col = Color.green;
+        for (int i = 0; i < t.Length; i += 3)
+        {
+            Vector3 a = v[t[i]], b = v[t[i + 1]], c = v[t[i + 2]];
+            Debug.DrawLine(a, b, col, 0f, false);
+            Debug.DrawLine(b, c, col, 0f, false);
+            Debug.DrawLine(c, a, col, 0f, false);
+        }
+    }
 
     public void Rebuild()
     {
@@ -213,10 +257,8 @@ public class HeadField : MonoBehaviour
                     int i = Index(x, y, z);
                     Vector3 local = _origin + new Vector3(x, y, z) * _pitch;
 
-                    //HOLLOW first, while the form is still closed.//
                     if (hollow) w[i] = Mathf.Min(w[i], shellThickness - w[i]);
 
-                    //CUT second, removing material from the finished shell.//
                     if (cutaway)
                     {
                         Vector3 n = cutNormal.sqrMagnitude > 1e-6f ? cutNormal.normalized : Vector3.right;
@@ -235,15 +277,6 @@ public class HeadField : MonoBehaviour
         March(w, verts, tris);
         KeepLargestComponent(verts, tris);
 
-        //Weld coincident vertices. The march emits three unshared vertices per triangle, so
-        //every facet edge is a seam of duplicate vertices at the same position. Under the
-        //ripple shader those duplicates can displace by fractionally different amounts and
-        //pull apart, opening thin slits that show the interior through the surface. Welding
-        //shared corners into one vertex makes them move as a unit, closing the seams.
-        //
-        //The cost is smooth normals - a welded vertex has one normal averaged across its
-        //faces, softening the planar facets. That is the trade for a surface that does not
-        //tear when displaced.
         WeldVertices(verts, tris);
 
         if (verts.Count == 0)
@@ -266,7 +299,6 @@ public class HeadField : MonoBehaviour
             if (lit == null) lit = Shader.Find("Standard");
             headMaterial = new Material(lit);
             headMaterial.color = new Color(0.82f, 0.80f, 0.76f);
-            //Double-sided, so the far wall is visible when looking in through the cut.//
             if (headMaterial.HasProperty("_Cull")) headMaterial.SetFloat("_Cull", 0f);
         }
 
@@ -274,21 +306,21 @@ public class HeadField : MonoBehaviour
 
         if (_mesh == null) _mesh = new Mesh();
         _mesh.Clear();
-        _mesh.indexFormat = verts.Count > 65000
-            ? UnityEngine.Rendering.IndexFormat.UInt32
-            : UnityEngine.Rendering.IndexFormat.UInt16;
+        _mesh.indexFormat = verts.Count > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16;
         _mesh.SetVertices(verts);
         _mesh.SetTriangles(tris, 0);
         _mesh.RecalculateNormals();
         _mesh.RecalculateBounds();
+
+        _paint = new Color[verts.Count];
+        for (int i = 0; i < _paint.Length; i++) _paint[i] = new Color(0f, 0f, 0f, 0f);
+        _mesh.colors = _paint;
+
         _meshObject.GetComponent<MeshFilter>().mesh = _mesh;
 
-        Debug.Log($"PRISM HeadField: rebuilt - {verts.Count} verts, {tris.Count / 3} tris");
+        Debug.Log($"<color=cyan>PRISM HeadField [{name}]: TRIANGLE COUNT = {tris.Count / 3}  " + $"(verts {verts.Count})</color>");
     }
 
-    //Merges vertices at the same position into one, so shared corners move together under
-    //displacement. Quantises positions to weld, then rebuilds the triangle list to index
-    //the merged set.
     private void WeldVertices(List<Vector3> verts, List<int> tris)
     {
         if (verts.Count == 0) return;
@@ -296,15 +328,13 @@ public class HeadField : MonoBehaviour
         var map = new Dictionary<Vector3Int, int>();
         var merged = new List<Vector3>();
         int[] remap = new int[verts.Count];
-        float weldStep = _pitch * scale * 0.05f;   //5% of a scaled voxel//
+        float weldStep = _pitch * scale * 0.05f;  
         float q = 1f / weldStep;
 
         for (int i = 0; i < verts.Count; i++)
         {
             Vector3 v = verts[i];
-            var key = new Vector3Int(Mathf.RoundToInt(v.x * q),
-                                     Mathf.RoundToInt(v.y * q),
-                                     Mathf.RoundToInt(v.z * q));
+            var key = new Vector3Int(Mathf.RoundToInt(v.x * q), Mathf.RoundToInt(v.y * q), Mathf.RoundToInt(v.z * q));
             if (!map.TryGetValue(key, out int id))
             {
                 id = merged.Count;
@@ -315,13 +345,14 @@ public class HeadField : MonoBehaviour
         }
 
         for (int t = 0; t < tris.Count; t++)
+        {
             tris[t] = remap[tris[t]];
+        }
 
         verts.Clear();
         verts.AddRange(merged);
     }
 
-    //Marching cubes over the field, using the shared lookup tables.//
     private void March(float[] field, List<Vector3> verts, List<int> tris)
     {
         float[] cube = new float[8];
@@ -339,7 +370,6 @@ public class HeadField : MonoBehaviour
                         int ix = x + o.x, iy = y + o.y, iz = z + o.z;
                         cube[i] = field[Index(ix, iy, iz)];
                         corner[i] = _origin + new Vector3(ix, iy, iz) * _pitch;
-                        //Positive is INSIDE, so flag corners that sit within the solid.//
                         if (cube[i] > 0f) cubeIndex |= (1 << i);
                     }
 
@@ -359,7 +389,6 @@ public class HeadField : MonoBehaviour
                     for (int i = 0; MarchingCubesTables.TriTable[cubeIndex, i] != -1; i += 3)
                     {
                         int b0 = verts.Count;
-                        //Wound so faces point outward given "positive = inside".//
                         verts.Add(LocalToWorld(edgeVert[MarchingCubesTables.TriTable[cubeIndex, i + 2]]));
                         verts.Add(LocalToWorld(edgeVert[MarchingCubesTables.TriTable[cubeIndex, i + 1]]));
                         verts.Add(LocalToWorld(edgeVert[MarchingCubesTables.TriTable[cubeIndex, i]]));
@@ -368,10 +397,6 @@ public class HeadField : MonoBehaviour
                 }
     }
 
-    //Marching a sampled field always throws off small disconnected pockets where the sign
-    //flips in isolation; they render as floating polyhedra around the head. Keep only the
-    //largest connected body. Vertices are welded by position first, because the march
-    //emits each triangle with its own unshared vertices.
     private void KeepLargestComponent(List<Vector3> verts, List<int> tris)
     {
         if (verts.Count == 0) return;
@@ -383,9 +408,7 @@ public class HeadField : MonoBehaviour
         for (int i = 0; i < verts.Count; i++)
         {
             Vector3 v = verts[i];
-            var key = new Vector3Int(Mathf.RoundToInt(v.x * q),
-                                     Mathf.RoundToInt(v.y * q),
-                                     Mathf.RoundToInt(v.z * q));
+            var key = new Vector3Int(Mathf.RoundToInt(v.x * q), Mathf.RoundToInt(v.y * q), Mathf.RoundToInt(v.z * q));
             if (!map.TryGetValue(key, out int id)) { id = map.Count; map[key] = id; }
             weld[i] = id;
         }
@@ -455,7 +478,6 @@ public class HeadField : MonoBehaviour
         {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}
     };
 
-    //Editor convenience: regenerate from the inspector without entering play mode.//
     [ContextMenu("Rebuild Head")]
     private void RebuildFromMenu()
     {

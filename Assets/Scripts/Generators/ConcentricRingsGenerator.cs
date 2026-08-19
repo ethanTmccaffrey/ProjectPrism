@@ -1,45 +1,28 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-//ConcentricRingsGenerator - Kluver Category 1 (Tunnels and Funnels), ripple subcategory//
-
-//Sends rings rippling outward from a point on a tilted plane, like water//
-//Each ring is born small, expands outward, and then FREEZES permanently at its final radius — so you watch the ripple travel, and what it leaves behind is a fixed set of concentric circles recording the song's swells//
-
-//Distinct from TunnelDepth, which shares this category: TunnelDepth RECEDES (bores away into depth toward a vanishing point)//
-//ConcentricRings EXPANDS (ripples outward across a plane)//
-//Depth versus spread — the same form constant expressed oppositely//
-
-//Timbral home (weight = tX * tF * E): sustained (not percussive), tonal, and ENERGETIC//
-//Big powerful flowing music — orchestral swells, post-rock crescendos, sustained walls of tonal sound//
-//Nothing else in the catalogue owns this corner//
-
-//Acoustic -> visual://
-//Ring thickness: energy at birth (powerful moments leave bolder rings)//
-//Ripple rate: energy (bigger swells send rings more often)//
-//Expansion speed: energy at birth (a powerful swell ripples out faster)//
-//Colour: RealtimeColour at birth//
-//Prominence: ripple centre position + overall scale//
-
 public class ConcentricRingsGenerator : MonoBehaviour
 {
     [Header("Activation")]
     [SerializeField] private float activationThreshold = 0.15f;
 
     [Header("Ripples")]
-    [SerializeField] private float rippleRate = 1.2f;
+    [SerializeField] private float rippleRate = 0.5f;
     [SerializeField] private int maxRings = 150;
-    [SerializeField] private float minFinalRadius = 8f;
-    [SerializeField] private float maxFinalRadius = 30f;
-    [SerializeField] private float minExpandSpeed = 3f;
-    [SerializeField] private float maxExpandSpeed = 12f;
+    [SerializeField] private float minFinalAngle = 0.25f;
+    [SerializeField] private float maxFinalAngle = 1.6f;
+    [SerializeField] private float minExpandSpeed = 0.15f;
+    [SerializeField] private float maxExpandSpeed = 0.5f;
 
     [Header("Ring Shape")]
-    [SerializeField] private int ringSegments = 48;
-    [SerializeField] private float minThickness = 0.06f;
-    [SerializeField] private float maxThickness = 0.5f;
+    [SerializeField] private int ringSegments = 64;
+    [SerializeField] private float minThickness = 0.2f;
+    [SerializeField] private float maxThickness = 1.2f;
 
-    [Header("Placement")]
+    [Header("Placement & Coupling")]
+    [SerializeField] private HeadPlacement placement;
+    [SerializeField] private SkullRipple skullRipple;
+    [SerializeField, Range(0f, 1f)] private float skullTintMute = 0.9f;
     [SerializeField] private float maxCentreOffset = 30f;
 
     private GameObject _root;
@@ -47,13 +30,8 @@ public class ConcentricRingsGenerator : MonoBehaviour
     private Material _ringMaterial;
 
     private bool _active = false;
-    private bool _seeded = false;
     private float _emitAccumulator = 0f;
     private int _ringCount = 0;
-
-    private Vector3 _centre;
-    private Quaternion _planeRotation;
-    private float _sizeScale = 1f;
 
     public void SetPrism(PRISMGenerator prism)
     {
@@ -70,7 +48,6 @@ public class ConcentricRingsGenerator : MonoBehaviour
         _ringMaterial = new Material(shader);
 
         _active = false;
-        _seeded = false;
         _emitAccumulator = 0f;
         _ringCount = 0;
 
@@ -87,8 +64,6 @@ public class ConcentricRingsGenerator : MonoBehaviour
         if (!_active) return;
         if (_ringCount >= maxRings) return;
 
-        if (!_seeded) SeedRipples(pr);
-
         _emitAccumulator += rippleRate * profile.RealtimeEnergy * Time.deltaTime;
         int ticks = Mathf.FloorToInt(_emitAccumulator);
         if (ticks <= 0) return;
@@ -103,24 +78,18 @@ public class ConcentricRingsGenerator : MonoBehaviour
         _active = false;
     }
 
-    private void SeedRipples(Prominence pr)
-    {
-        _centre = transform.position + Random.onUnitSphere * (maxCentreOffset * (1f - pr.centrality));
-        _planeRotation = Random.rotationUniform;
-        _sizeScale = Mathf.Lerp(0.5f, 1.2f, pr.prominence);
-        _seeded = true;
-    }
-
     private void EmitRing(TimbralProfile profile, Prominence pr)
     {
         float e = profile.RealtimeEnergy;
 
         float thickness = Mathf.Lerp(minThickness, maxThickness, e) * Mathf.Lerp(0.6f, 1f, pr.prominence);
-
-        float finalRadius = Mathf.Lerp(minFinalRadius, maxFinalRadius, e) * _sizeScale;
+        float energyBase = Mathf.Lerp(minFinalAngle, maxFinalAngle, e);
+        float finalAngle = Mathf.Lerp(minFinalAngle, energyBase, Random.value) * Mathf.Lerp(0.7f, 1.2f, pr.prominence);
+        finalAngle = Mathf.Clamp(finalAngle, minFinalAngle, maxFinalAngle);
         float expandSpeed = Mathf.Lerp(minExpandSpeed, maxExpandSpeed, e);
 
         Color colour = _prism != null ? _prism.RealtimeColour : Color.white;
+        Vector3 earDir = PickEarDirection();
 
         GameObject ringGO = new GameObject("Ring");
         ringGO.transform.SetParent(_root.transform);
@@ -138,10 +107,25 @@ public class ConcentricRingsGenerator : MonoBehaviour
         lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         lr.receiveShadows = false;
 
-        var ripple = ringGO.AddComponent<RingRipple>();
-        ripple.Begin(_centre, _planeRotation, ringSegments, finalRadius, expandSpeed, lr);
+        var ripple = ringGO.AddComponent<EllipsoidRingRipple>();
+        ripple.Begin(placement, earDir, ringSegments, finalAngle, expandSpeed, lr);
+
+        if (skullRipple != null)
+        {
+            Color muted = colour * skullTintMute;
+            muted.a = 1f;
+            skullRipple.TriggerRipple(earDir, e, muted);
+        }
 
         _ringCount++;
+    }
+
+    private Vector3 PickEarDirection()
+    {
+        Vector3 left = skullRipple != null ? skullRipple.LeftOrigin : new Vector3(-1f, 0.1f, 0.15f);
+        Vector3 right = skullRipple != null ? skullRipple.RightOrigin : new Vector3(1f, 0.1f, 0.15f);
+        Vector3 baseDir = (Random.value < 0.5f ? left : right).normalized;
+        return (baseDir + Random.insideUnitSphere * 0.08f).normalized;
     }
 
     private void OnDestroy()
@@ -150,26 +134,28 @@ public class ConcentricRingsGenerator : MonoBehaviour
     }
 }
 
-public class RingRipple : MonoBehaviour
+public class EllipsoidRingRipple : MonoBehaviour
 {
-    private Vector3 _centre;
-    private Quaternion _plane;
+    private HeadPlacement _placement;
+    private Vector3 _earDir;  
     private int _segments;
-    private float _finalRadius;
+    private float _finalAngle;
     private float _speed;
     private LineRenderer _lr;
 
-    private float _radius = 0.2f;
+    private float _angle = 0.02f;   
     private bool _frozen = false;
 
-    public void Begin(Vector3 centre, Quaternion plane, int segments, float finalRadius, float speed, LineRenderer lr)
+    public void Begin(HeadPlacement placement, Vector3 earDir, int segments,
+                      float finalAngle, float speed, LineRenderer lr)
     {
-        _centre = centre;
-        _plane = plane;
+        _placement = placement;
+        _earDir = earDir.normalized;
         _segments = segments;
-        _finalRadius = finalRadius;
+        _finalAngle = finalAngle;
         _speed = speed;
         _lr = lr;
+
         Redraw();
     }
 
@@ -177,29 +163,42 @@ public class RingRipple : MonoBehaviour
     {
         if (_frozen || _lr == null) return;
 
-        _radius += _speed * Time.deltaTime;
-
-        if (_radius >= _finalRadius)
+        _angle += _speed * Time.deltaTime;
+        if (_angle >= _finalAngle)
         {
-            _radius = _finalRadius;
+            _angle = _finalAngle;
             Redraw();
             _frozen = true;
             enabled = false;
             return;
         }
-
         Redraw();
     }
 
     private void Redraw()
     {
+        if (_placement == null || !_placement.Ready) return;
+
+        Vector3 radii = _placement.EllipsoidRadii;
+        Vector3 centre = _placement.EllipsoidCentre;
+        Vector3 earU = new Vector3(_earDir.x / radii.x, _earDir.y / radii.y, _earDir.z / radii.z).normalized;
+
+        Vector3 tA = Vector3.Cross(earU, Vector3.up);
+        if (tA.sqrMagnitude < 1e-4f) tA = Vector3.Cross(earU, Vector3.right);
+        tA.Normalize();
+        Vector3 tB = Vector3.Cross(earU, tA).normalized;
+
+        float sinA = Mathf.Sin(_angle);
+        float cosA = Mathf.Cos(_angle);
+
         Vector3[] pts = new Vector3[_segments];
         for (int i = 0; i < _segments; i++)
         {
-            float ang = (i / (float)_segments) * Mathf.PI * 2f;
-            Vector3 local = new Vector3(Mathf.Cos(ang) * _radius, Mathf.Sin(ang) * _radius, 0f);
-            pts[i] = _centre + _plane * local;
+            float t = (i / (float)_segments) * Mathf.PI * 2f;
+            Vector3 dU = earU * cosA + (tA * Mathf.Cos(t) + tB * Mathf.Sin(t)) * sinA;
+            pts[i] = centre + Vector3.Scale(dU, radii);
         }
+
         _lr.positionCount = _segments;
         _lr.SetPositions(pts);
     }
