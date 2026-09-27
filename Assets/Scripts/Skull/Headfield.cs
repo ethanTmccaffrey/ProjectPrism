@@ -2,7 +2,12 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
+//HeadField//
+//Marching-cubes mesh built from a baked head SDF (Resources/head_sdf)//
+//rendered as a two-shell hollow with plane/sphere/eye cutaways carving through to the interior void//
+//Exposes vertex-paint (PaintSphere / PaintPlane / ApplyPaint / ClearPaint) and NearestSurfacePoint placement queries for generators//
 //Head mesh: "Planar head (Oleg Toropygin)" by BlueHorse (https://skfb.ly/6yCE7), CC-BY 4.0.//
+//Meshing uses Lorensen & Cline (1987) marching-cubes tables via MarchingCubesTables.//
 
 public class HeadField : MonoBehaviour
 {
@@ -27,6 +32,12 @@ public class HeadField : MonoBehaviour
     [SerializeField] private Vector3 cutSphereCentre = new Vector3(0.4f, 0.3f, 0.6f);
     [SerializeField] private float cutSphereRadius = 1.2f;
 
+    [Header("Cutaway - Eyes")]
+    [SerializeField] private bool eyeCut = false;
+    [SerializeField] private Vector3 leftEyeCentre = new Vector3(-0.5f, 0.55f, 0.75f);
+    [SerializeField] private Vector3 rightEyeCentre = new Vector3(0.5f, 0.55f, 0.75f);
+    [SerializeField] private float eyeCutRadius = 0.35f;
+
     [Header("Rendering")]
     [SerializeField] private Material headMaterial;
     [SerializeField] private bool generateOnStart = true;
@@ -40,33 +51,117 @@ public class HeadField : MonoBehaviour
 
     private GameObject _meshObject;
     private Mesh _mesh;
+    private Vector3[] _cachedVerts;
+    private Vector3[] _cachedNorms;
+    private Dictionary<int, List<int>> _grid;
+    private float _gridCell;
+    private Vector3 _gridMin;
     private Color[] _paint;
 
     public bool Loaded => _loaded;
     public Bounds FieldBounds { get; private set; }
     public float ShellThickness => shellThickness;
+    public bool EyeCutEnabled => eyeCut;
+    public Vector3 LeftEyeWorld => transform.TransformPoint(offset + leftEyeCentre * scale);
+    public Vector3 RightEyeWorld => transform.TransformPoint(offset + rightEyeCentre * scale);
+    public float EyeRadiusWorld => eyeCutRadius * scale;
+    public Vector3 HeadCentreWorld => FieldBounds.center;
 
     public float VoxelWorldSize => _pitch * scale;
     public bool HasMesh => _mesh != null && _mesh.vertexCount > 0;
-
     public bool RandomSurfacePoint(out Vector3 point, out Vector3 normal)
     {
         point = Vector3.zero; normal = Vector3.up;
         if (!HasMesh) return false;
-        var verts = _mesh.vertices;
-        var norms = _mesh.normals;
+        var verts = _cachedVerts ?? _mesh.vertices;
+        var norms = _cachedNorms ?? _mesh.normals;
         int i = UnityEngine.Random.Range(0, verts.Length);
         point = verts[i];
         normal = (norms != null && norms.Length == verts.Length) ? norms[i].normalized : Vector3.up;
         return true;
     }
 
+    private void BuildSpatialGrid()
+    {
+        _cachedVerts = _mesh.vertices;
+        _cachedNorms = _mesh.normals;
+
+        _gridCell = Mathf.Max(0.5f, VoxelWorldSize * 2f);
+
+        Bounds b = _mesh.bounds;
+        _gridMin = b.min - Vector3.one * _gridCell;
+
+        _grid = new Dictionary<int, List<int>>(_cachedVerts.Length);
+        for (int i = 0; i < _cachedVerts.Length; i++)
+        {
+            int h = CellHash(_cachedVerts[i]);
+            if (!_grid.TryGetValue(h, out var list)) { list = new List<int>(); _grid[h] = list; }
+            list.Add(i);
+        }
+    }
+
+    private int CellHash(Vector3 p)
+    {
+        int cx = Mathf.FloorToInt((p.x - _gridMin.x) / _gridCell);
+        int cy = Mathf.FloorToInt((p.y - _gridMin.y) / _gridCell);
+        int cz = Mathf.FloorToInt((p.z - _gridMin.z) / _gridCell);
+        unchecked { return (cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791); }
+    }
+
     public bool NearestSurfacePoint(Vector3 world, out Vector3 point, out Vector3 normal)
     {
         point = world; normal = Vector3.up;
         if (!HasMesh) return false;
-        var verts = _mesh.vertices;
-        var norms = _mesh.normals;
+
+        if (_grid == null || _cachedVerts == null)
+        {
+            return NearestSurfacePointLinear(world, out point, out normal);
+        }
+
+        int cx = Mathf.FloorToInt((world.x - _gridMin.x) / _gridCell);
+        int cy = Mathf.FloorToInt((world.y - _gridMin.y) / _gridCell);
+        int cz = Mathf.FloorToInt((world.z - _gridMin.z) / _gridCell);
+
+        float best = float.MaxValue; int bestI = -1;
+        int foundRing = -1;
+
+        for (int r = 0; r <= 32; r++)
+        {
+            for (int dx = -r; dx <= r; dx++)
+                for (int dy = -r; dy <= r; dy++)
+                    for (int dz = -r; dz <= r; dz++)
+                    {
+                        if (r > 0 && Mathf.Abs(dx) != r && Mathf.Abs(dy) != r && Mathf.Abs(dz) != r) continue;
+
+                        int h = HashCell(cx + dx, cy + dy, cz + dz);
+                        if (!_grid.TryGetValue(h, out var list)) continue;
+                        for (int k = 0; k < list.Count; k++)
+                        {
+                            int idx = list[k];
+                            float d = (_cachedVerts[idx] - world).sqrMagnitude;
+                            if (d < best) { best = d; bestI = idx; }
+                        }
+                    }
+
+            if (bestI >= 0 && foundRing < 0) foundRing = r;
+            if (foundRing >= 0 && r >= foundRing + 1) break;
+        }
+
+        if (bestI < 0) return NearestSurfacePointLinear(world, out point, out normal);
+        point = _cachedVerts[bestI];
+        normal = (_cachedNorms != null && _cachedNorms.Length == _cachedVerts.Length) ? _cachedNorms[bestI].normalized : Vector3.up;
+        return true;
+    }
+
+    private int HashCell(int cx, int cy, int cz)
+    {
+        unchecked { return (cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791); }
+    }
+    private bool NearestSurfacePointLinear(Vector3 world, out Vector3 point, out Vector3 normal)
+    {
+        point = world; normal = Vector3.up;
+        var verts = _cachedVerts ?? _mesh.vertices;
+        var norms = _cachedNorms ?? _mesh.normals;
         float best = float.MaxValue; int bestI = -1;
         for (int i = 0; i < verts.Length; i++)
         {
@@ -93,6 +188,7 @@ public class HeadField : MonoBehaviour
             }
         }
     }
+
     public void PaintPlane(Vector3 planePoint, Vector3 planeNormal, float worldHalfThickness, Color colour, float strength)
     {
         if (_paint == null || _mesh == null) return;
@@ -137,6 +233,7 @@ public class HeadField : MonoBehaviour
         if (generateOnStart && Load()) Rebuild();
     }
 
+
     public bool Load()
     {
         TextAsset asset = Resources.Load<TextAsset>(resourceName);
@@ -167,7 +264,7 @@ public class HeadField : MonoBehaviour
         _ny = BitConverter.ToInt32(bytes, p); p += 4;
         _nz = BitConverter.ToInt32(bytes, p); p += 4;
 
-        _origin = new Vector3(BitConverter.ToSingle(bytes, p),BitConverter.ToSingle(bytes, p + 4), BitConverter.ToSingle(bytes, p + 8));
+        _origin = new Vector3(BitConverter.ToSingle(bytes, p), BitConverter.ToSingle(bytes, p + 4), BitConverter.ToSingle(bytes, p + 8));
         p += 12;
 
         _pitch = BitConverter.ToSingle(bytes, p); p += 4;
@@ -270,13 +367,19 @@ public class HeadField : MonoBehaviour
                         float d = Vector3.Distance(local, cutSphereCentre) - cutSphereRadius;
                         w[i] = Mathf.Min(w[i], d);
                     }
+                    if (eyeCut)
+                    {
+                        float dL = Vector3.Distance(local, leftEyeCentre) - eyeCutRadius;
+                        w[i] = Mathf.Min(w[i], dL);
+                        float dR = Vector3.Distance(local, rightEyeCentre) - eyeCutRadius;
+                        w[i] = Mathf.Min(w[i], dR);
+                    }
                 }
 
         var verts = new List<Vector3>();
         var tris = new List<int>();
         March(w, verts, tris);
         KeepLargestComponent(verts, tris);
-
         WeldVertices(verts, tris);
 
         if (verts.Count == 0)
@@ -318,6 +421,8 @@ public class HeadField : MonoBehaviour
 
         _meshObject.GetComponent<MeshFilter>().mesh = _mesh;
 
+        BuildSpatialGrid();
+
         Debug.Log($"<color=cyan>PRISM HeadField [{name}]: TRIANGLE COUNT = {tris.Count / 3}  " + $"(verts {verts.Count})</color>");
     }
 
@@ -328,7 +433,7 @@ public class HeadField : MonoBehaviour
         var map = new Dictionary<Vector3Int, int>();
         var merged = new List<Vector3>();
         int[] remap = new int[verts.Count];
-        float weldStep = _pitch * scale * 0.05f;  
+        float weldStep = _pitch * scale * 0.05f;
         float q = 1f / weldStep;
 
         for (int i = 0; i < verts.Count; i++)
@@ -445,7 +550,9 @@ public class HeadField : MonoBehaviour
 
         int best = -1, bestCount = -1;
         foreach (var kv in sizes)
+        {
             if (kv.Value > bestCount) { bestCount = kv.Value; best = kv.Key; }
+        }
 
         var keep = new List<int>(bestCount * 3);
         for (int t = 0; t < tris.Count; t += 3)

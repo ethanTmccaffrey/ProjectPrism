@@ -4,38 +4,14 @@ using System.IO;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-//AudioAnalyser: runs the offline analysis pass and loads the result.
-//
-//This class used to be ~500 lines of DSP: a hand-written Cooley-Tukey FFT, spectral
-//flatness, centroid, inharmonicity, zero-crossing rate, an autocorrelation tempo
-//estimator. All of that is gone. Analysis now happens in prism_analyse.exe (librosa,
-//McFee et al. 2015), which is called as a subprocess before playback begins.
-//
-//Two reasons for the change:
-//
-//1. CORRECTNESS. The hand-rolled measures were repeatedly found to be measuring
-//   something other than what they claimed. Validated against tracks of known
-//   character, spectral flatness could not separate distorted guitar from dense
-//   synthesis; nor could spectral inharmonicity; and zero-crossing rate ranked an
-//   orchestral piece as rougher than metal. librosa's implementations are standard,
-//   peer-reviewed and citable, and the contribution of this project is the MAPPING from
-//   acoustic measurement to visual form, not the DSP underneath it.
-//
-//2. ARCHITECTURE. PRISM is a persistent canvas: the entire song is known before the
-//   first mark is drawn. Nothing ever required the analysis to happen live. Doing it
-//   offline means measures can be computed over a WINDOW of time rather than from a
-//   single spectral frame - which matters, because the measures that actually
-//   distinguish one song from another (rhythmic regularity, onset density, percussive
-//   ratio, dynamic range) are all temporal and cannot be read from an instant.
-//
-//Playback is now a lookup rather than a computation, so it is also considerably cheaper.
+//AudioAnalyser//
+//Runs the offline analysis subprocess (prism_analyse.exe) on the chosen track, caches the JSON result and loads it into the TimbralProfile//
+//Acoustic analysis is performed by librosa (McFee et al. 2015); at runtime PRISM only reads the result//
 
 public class AudioAnalyser : MonoBehaviour
 {
     [Header("Analyser")]
-    //Path to the bundled analyser executable, relative to StreamingAssets.//
     [SerializeField] private string analyserExecutable = "prism_analyse.exe";
-    //Where the generated JSON is cached. Re-analysing a track is skipped if it exists.//
     [SerializeField] private bool cacheAnalysis = true;
     [SerializeField] private float timeoutSeconds = 300f;
 
@@ -44,8 +20,6 @@ public class AudioAnalyser : MonoBehaviour
     public bool AnalysisFailed { get; private set; } = false;
     public string StatusMessage { get; private set; } = "";
 
-    //Kept because PRISMGenerator.DeriveQualities() reads them. Sourced from the analysis//
-    //rather than computed here.//
     public float EstimatedTempo => TimbralProfile.StaticTempo;
     public float PeakEnergy { get; private set; } = 1f;
     public float AverageEnergy { get; private set; } = 0.5f;
@@ -56,7 +30,6 @@ public class AudioAnalyser : MonoBehaviour
 
     private Process _process;
 
-    //Analyses the file at audioPath, then loads the result. Yields until done.//
     public IEnumerator AnalyseFile(string audioPath)
     {
         AnalysisComplete = false;
@@ -70,7 +43,6 @@ public class AudioAnalyser : MonoBehaviour
 
         string jsonPath = Path.ChangeExtension(audioPath, ".prism.json");
 
-        //Skip the analysis pass if we have already done this track.//
         if (cacheAnalysis && File.Exists(jsonPath))
         {
             Debug.Log("PRISM: cached analysis found, skipping analysis pass");
@@ -82,8 +54,7 @@ public class AudioAnalyser : MonoBehaviour
         string exePath = Path.Combine(Application.streamingAssetsPath, analyserExecutable);
         if (!File.Exists(exePath))
         {
-            Fail("Analyser not found at " + exePath +
-                 " - build it with PyInstaller and place it in StreamingAssets.");
+            Fail("Analyser not found at " + exePath + " - build it with PyInstaller and place it in StreamingAssets.");
             yield break;
         }
 
@@ -119,7 +90,6 @@ public class AudioAnalyser : MonoBehaviour
             yield break;
         }
 
-        //Wait without blocking the main thread, so Unity keeps rendering a loading screen.//
         float elapsed = 0f;
         while (!_process.HasExited)
         {
@@ -169,9 +139,6 @@ public class AudioAnalyser : MonoBehaviour
             return false;
         }
 
-        //Unity's JsonUtility maps JSON keys to field names, and "static" is a C# keyword
-        //so it cannot be a field. Rename the key before parsing rather than complicating
-        //the Python side - the JSON is a contract and should read naturally.
         json = json.Replace("\"static\":", "\"stat\":");
 
         if (!TimbralProfile.LoadFromJson(json))
@@ -180,20 +147,16 @@ public class AudioAnalyser : MonoBehaviour
             return false;
         }
 
-        //Populate the values PRISMGenerator still expects.//
-        //Band averages come straight from the static profile's spectral balance; the old
-        //code derived these from its own FFT.
         RawLowAverage = TimbralProfile.RealtimeBandLow;
         RawMidAverage = TimbralProfile.RealtimeBandMid;
         RawHighAverage = TimbralProfile.RealtimeBandHigh;
 
-        //Sample frame zero so the band averages are populated before Init() reads them.//
         TimbralProfile.SampleAt(0f);
         RawLowAverage = TimbralProfile.RealtimeBandLow;
         RawMidAverage = TimbralProfile.RealtimeBandMid;
         RawHighAverage = TimbralProfile.RealtimeBandHigh;
 
-        PeakEnergy = 1f;   //frame energy is already normalised 0-1 by the analyser//
+        PeakEnergy = 1f;  
         AverageEnergy = Mathf.Clamp01(1f - TimbralProfile.StaticDynamicRange * 0.5f);
 
         StatusMessage = "Ready";
@@ -210,7 +173,6 @@ public class AudioAnalyser : MonoBehaviour
 
     private void OnDestroy()
     {
-        //Don't leave an orphaned analyser running if play mode is exited mid-analysis.//
         if (_process != null && !_process.HasExited)
         {
             try { _process.Kill(); } catch { }

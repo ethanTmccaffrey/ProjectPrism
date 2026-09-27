@@ -1,5 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
+
+//GridGratingGenerator//
+//Klüver Category 3 (Lattices / Honeycombs / Gratings)//
+//Paints parallel banded gratings across the skull one per beat, Triggered by rhythmic regularity x percussiveness, brightened by centroid//
+
 public class GridGratingGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -12,6 +17,7 @@ public class GridGratingGenerator : MonoBehaviour
     [Header("Placement & Painting")]
     [SerializeField] private HeadPlacement placement;
     [SerializeField] private float bandRadius = 1.0f;
+    [SerializeField, Range(0f, 1f)] private float paintBrightness = 0.5f;
     [SerializeField] private float paintStrength = 1f;
 
     [Header("Onset Detection (Dixon 2001)")]
@@ -28,7 +34,7 @@ public class GridGratingGenerator : MonoBehaviour
     private float _timeSinceLastBand = 0f;
 
     private Vector3 _gratingCentre;
-    private Vector3 _stepAxis;       
+    private Vector3 _stepAxis;     
     private int _bandCount = 0;
     private int _bandSign = 1;       
     private int _bandIndex = 0;
@@ -48,7 +54,6 @@ public class GridGratingGenerator : MonoBehaviour
         _bandSign = 1;
         _bandIndex = 0;
 
-        Debug.Log("PRISM GridGratingGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)
@@ -97,19 +102,9 @@ public class GridGratingGenerator : MonoBehaviour
 
     private void SeedGrating(Prominence pr)
     {
-
-        if (placement != null && placement.HasSkullMesh && placement.RandomSkullMeshPoint(out Vector3 sp, out _))
-        {
-            _gratingCentre = sp;
-        }
-        else if (placement != null && placement.Ready)
-        {
-            _gratingCentre = placement.CavityCentre;
-        }
-        else
-        {
-            _gratingCentre = transform.position;
-        }
+        if (placement != null && placement.HasSkullMesh && placement.RandomSkullMeshPoint(out Vector3 sp, out _)) _gratingCentre = sp;
+        else if (placement != null && placement.Ready) _gratingCentre = placement.CavityCentre;
+        else  _gratingCentre = transform.position;
 
         _stepAxis = Random.onUnitSphere;
         _bandCount = 0;
@@ -123,12 +118,12 @@ public class GridGratingGenerator : MonoBehaviour
         if (placement == null || !placement.HasSkullMesh) return;
 
         float regularity = profile.RealtimeRhythmicRegularity;
-        float jitter = Mathf.Lerp(0.4f, 0f, regularity); 
+        float jitter = Mathf.Lerp(0.4f, 0f, regularity);  
         int step = (_bandIndex + 1) / 2;
         float offset = _bandSign * step * bandStep * (1f + Random.Range(-jitter, jitter));
 
         Vector3 planePoint = _gratingCentre + _stepAxis * offset;
-        Color colour = _prism != null ? _prism.RealtimeColour : Color.white;
+        Color colour = (_prism != null ? _prism.RealtimeColour : Color.white) * paintBrightness;
 
         PaintBand(planePoint, _stepAxis, colour);
 

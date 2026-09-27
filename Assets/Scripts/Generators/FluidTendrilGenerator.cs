@@ -1,6 +1,10 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 
+//FluidTendrilGenerator//
+//Klüver Category 6 (Wavy Lines / Amorphous)//
+//Grows flowing organic tendril curves, Triggered by tonality x sustain (inverse percussiveness)//
+
 public class FluidTendrilGenerator : MonoBehaviour
 {
     [Header("Spawn Settings")]
@@ -65,7 +69,6 @@ public class FluidTendrilGenerator : MonoBehaviour
         _material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
         _material.renderQueue = 3000;
 
-        Debug.Log("PRSIM FLuidTendrilGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

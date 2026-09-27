@@ -149,15 +149,20 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
-  fieldRadius: 120
+  fieldRadius: 30
   maxStrokes: 1500
-  strokeLength: 6
-  zigSegments: 5
-  lineSpacing: 0.4
-  minAmplitude: 0.3
-  maxAmplitude: 1.6
-  lineWidth: 0.06
+  strokeLength: 160
+  zigSegments: 25
+  lineSpacing: 10
+  minAmplitude: 1
+  maxAmplitude: 10
+  lineWidth: 0.075
   directionFieldScale: 0.03
+  arcUp: 55
+  arcDown: 55
+  arcWidth: 55
+  mouthWidth: 55
+  mouthHeight: 12
   fluxHistorySize: 43
   onsetSensitivity: 1.5
   refractorySeconds: 0.14
@@ -567,6 +572,37 @@ MonoBehaviour:
   m_LightCookieSize: {x: 1, y: 1}
   m_LightCookieOffset: {x: 0, y: 0}
   m_SoftShadowQuality: 3
+--- !u!1 &485726625
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 485726626}
+  m_Layer: 0
+  m_Name: MouthAnchor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &485726626
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 485726625}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
+  m_LocalPosition: {x: 6.05, y: -176, z: -62}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1859146415}
+  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
 --- !u!1 &617377402
 GameObject:
   m_ObjectHideFlags: 0
@@ -601,7 +637,8 @@ MonoBehaviour:
   maxBands: 40
   placement: {fileID: 1373275665}
   bandRadius: 1
-  paintStrength: 1
+  paintBrightness: 0.3
+  paintStrength: 0.3
   fluxHistorySize: 43
   onsetSensitivity: 1.5
   refractorySeconds: 0.2
@@ -651,11 +688,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
   energyThreshold: 0.03
-  maxPanelOffset: 40
-  panelRadius: 35
+  placement: {fileID: 1373275665}
+  surfaceOffset: 4
+  panelRadius: 70
   minRootStems: 3
   maxRootStems: 7
-  rootCurlLength: 14
+  rootCurlLength: 34
   childScale: 0.62
   minCurlRate: 6
   maxCurlRate: 22
@@ -670,8 +708,8 @@ MonoBehaviour:
   growthRate: 60
   maxConcurrent: 6
   maxCurls: 600
-  rootLineWidth: 0.075
-  widthFalloff: 0.72
+  rootLineWidth: 1
+  widthFalloff: 0.85
   opacity: 0.9
 --- !u!4 &683252040
 Transform:
@@ -718,16 +756,21 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
-  fieldRadius: 50
-  verticalBias: 0.5
-  fieldGrowthSeconds: 0
-  shellInner: 0.5
-  minLength: 1.5
-  maxLength: 6
+  maxCracks: 12
+  minSegments: 20
+  maxSegments: 40
+  segmentLength: 8
+  maxKinkDegrees: 28
+  forkChance: 0.1
+  segmentsPerFrame: 2
+  maxConcurrentGrowing: 8
+  paintBrightness: 1
+  seamRadius: 0.8
+  seamSpacing: 0.6
+  placement: {fileID: 1373275665}
   fluxHistorySize: 43
-  onsetSensitivity: 1.5
-  refactorSeconds: 0.28
-  maxShards: 4000
+  onsetSensitivity: 1.6
+  refactorSeconds: 0.5
 --- !u!4 &701561037
 Transform:
   m_ObjectHideFlags: 0
@@ -996,7 +1039,8 @@ MonoBehaviour:
   placement: {fileID: 1373275665}
   paintRadius: 0.4
   paintSpacing: 0.3
-  paintStrength: 1
+  paintStrength: 0.6
+  paintBrightness: 0.4
   fluxHistorySize: 43
   onsetSensitivity: 1.8
   refractorySeconds: 0.4
@@ -1098,7 +1142,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   useDynamicPath: 0
-  inspectorClip: {fileID: 8300000, guid: 75c09b31afd22d14c8089ff86e4ec1db, type: 3}
+  inspectorClip: {fileID: 8300000, guid: e7fd8ba3c92a7e944b34f4b24328ce31, type: 3}
   filePath: C:\Users\ethan\Downloads\Ghost.mp3
   analyser: {fileID: 0}
   prism: {fileID: 0}
@@ -1160,14 +1204,13 @@ MonoBehaviour:
   cobwebSpline: {fileID: 282569660}
   zigzagParallel: {fileID: 51499714}
   wavyParallel: {fileID: 1621747298}
-  hatching: {fileID: 0}
   fluidTendril: {fileID: 1606740827}
-  amorphousSpeck: {fileID: 0}
   bilateralDuplication: {fileID: 1560741737}
   speckCluster: {fileID: 1194866155}
   organicCluster: {fileID: 1412442019}
   leftSourcePoint: {x: -120, y: 0, z: 0}
   rightSourcePoint: {x: 120, y: 0, z: 0}
+  mouthAnchor: {fileID: 485726626}
   hueTextureShift: 0.3
   activeFloor: 0.05
   prominenceSmoothing: 1.5
@@ -1210,9 +1253,13 @@ MonoBehaviour:
   cutaway: 0
   cutNormal: {x: 1, y: 0, z: 0}
   cutOffset: 0
-  sphericalCut: 1
+  sphericalCut: 0
   cutSphereCentre: {x: 0.4, y: 0.3, z: 0.6}
-  cutSphereRadius: 1.2
+  cutSphereRadius: 1.3
+  eyeCut: 1
+  leftEyeCentre: {x: 0.6, y: -1.36, z: 0.55}
+  rightEyeCentre: {x: -0.6, y: -1.36, z: 0.55}
+  eyeCutRadius: 0.37
   headMaterial: {fileID: 2100000, guid: 0cfb02675feec3e4184fa6cb5c48f0c0, type: 2}
   generateOnStart: 1
   wireframe: 0
@@ -1342,17 +1389,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
-  minPerBurst: 2
-  maxPerBurst: 14
+  minPerBurst: 5
+  maxPerBurst: 20
   maxButterflies: 500
   fallbackTrackSeconds: 180
-  minSize: 1.6
-  maxSize: 3.2
+  minSize: 7
+  maxSize: 10
   minLaunchSpeed: 18
   maxLaunchSpeed: 45
   drag: 0.5
   settleSpeed: 0.4
   launchSpread: 1.1
+  forwardBias: 0.35
   widthHistorySize: 43
   widthSensitivity: 1.3
   refractorySeconds: 0.25
@@ -1458,22 +1506,27 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
   energyThreshold: 0.04
-  fieldRadius: 60
+  fieldRadius: 30
   maxBundles: 400
   fallbackTrackSeconds: 180
-  bundleLength: 12
-  lineResolution: 32
-  minLines: 4
-  maxLines: 10
-  lineSpacing: 0.5
-  minAmplitude: 0.4
-  maxAmplitude: 2.4
-  minWaves: 1.2
-  maxWaves: 3.5
-  lineWidth: 0.07
+  bundleLength: 200
+  lineResolution: 96
+  minLines: 2
+  maxLines: 6
+  lineSpacing: 10
+  minAmplitude: 1
+  maxAmplitude: 15
+  minWaves: 3
+  maxWaves: 25
+  lineWidth: 0.5
   growthRate: 2.5
   directionFieldScale: 0.025
-  maxFieldOffset: 35
+  arcUp: 55
+  arcDown: 55
+  arcWidth: 55
+  mouthWidth: 55
+  mouthHeight: 12
+  maxFieldOffset: 30
 --- !u!4 &1621747299
 Transform:
   m_ObjectHideFlags: 0
@@ -1572,17 +1625,19 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   activationThreshold: 0.15
-  mouthRadius: 15
+  head: {fileID: 1859146414}
+  mouthRadiusFraction: 0.9
+  fallbackMouthRadius: 6
   taper: 0.854
   depthStep: 2.5
   ringSegments: 24
   maxRings: 120
   growthRate: 1
   breathAmount: 0.25
+  convergeDepth: 1.5
   baseCurve: 3
   energyCurve: 6
-  headingBias: 0.6
-  maxMouthOffset: 30
+  axisBias: 0.12
   wallOpacity: 0.5
   edgeWidth: 0.1
 --- !u!4 &1753336525
@@ -1697,9 +1752,13 @@ MonoBehaviour:
   cutaway: 0
   cutNormal: {x: 1, y: 0, z: 0}
   cutOffset: 0
-  sphericalCut: 1
+  sphericalCut: 0
   cutSphereCentre: {x: 0.4, y: 0.3, z: 0.6}
-  cutSphereRadius: 1.2
+  cutSphereRadius: 1.3
+  eyeCut: 1
+  leftEyeCentre: {x: 0.6, y: -1.32, z: 0.52}
+  rightEyeCentre: {x: -0.6, y: -1.32, z: 0.52}
+  eyeCutRadius: 0.29
   headMaterial: {fileID: 2100000, guid: 76b13ec6308ec4e4585b7e974af0900b, type: 2}
   generateOnStart: 1
   wireframe: 0
@@ -1715,7 +1774,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 485726626}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: -90, y: 0, z: 180}
 --- !u!114 &1859146416

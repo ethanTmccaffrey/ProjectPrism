@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//SpiralGrowthGenerator//
+//Klüver Category 2 (Spirals)//
+//Grows spiralling forms via accumulated direction rotation, Triggered by harmonic complexity x tonality x sustain (inverse percussiveness)//
+
 public class SpiralGrowthGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -75,7 +79,6 @@ public class SpiralGrowthGenerator : MonoBehaviour
         _wavePhase = 0f;
         _spinAngle = 0f;
 
-        Debug.Log("PRISM SpiralGrowthGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

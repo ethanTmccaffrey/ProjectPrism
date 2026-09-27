@@ -1,6 +1,11 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//HeadPlacement//
+//Placement service between generators and the head geometry//
+//Probes the hollow interior into a containment ellipsoid and provides cavity/ellipsoid sampling (RandomPointInCavity, WallAnchors, claim-based spacing) for interior generators//
+//plus skull-surface projection and paint forwarding (PaintSkull / PaintPlane / NearestSkullMeshPoint) for shell generators//
+
 [RequireComponent(typeof(HeadField))]
 public class HeadPlacement : MonoBehaviour
 {

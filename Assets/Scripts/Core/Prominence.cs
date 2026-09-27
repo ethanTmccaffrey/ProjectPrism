@@ -1,7 +1,8 @@
 using UnityEngine;
-//Prominence — what the coordination layer hands back to a generator each frame//
-//Describes how much presence this generator should command RIGHT NOW, relative to every other active generator, so marks can be placed with spatial hierarchy rather than all competing for the centre//
-//Values are consumed at spawn time and then locked into the mark (persistent-canvas principle): a mark records the song's character at the moment it was born//
+
+//Prominence//
+//Per-frame presence value the coordination layer hands each generator (dominant flag, centrality, prominence)//
+//Consumed at spawn time and locked into the mark, per the persistent-canvas principle//
 public struct Prominence
 {
     //True only for the single highest-weighted active generator this frame//

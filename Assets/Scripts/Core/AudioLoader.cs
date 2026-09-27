@@ -3,20 +3,9 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.Networking;
 
-//AudioLoader: PRISM's entry point.
-//
-//Loads an audio file, hands it to AudioAnalyser for the offline analysis pass, waits for
-//that to finish, then starts playback and hands control to PRISMGenerator.
-//
-//Order matters. The analysis must complete BEFORE the audio starts, because the
-//generators read a pre-computed timeline sampled at the current playback position - if
-//the song is already playing when the timeline arrives, the visuals are out of sync with
-//the music for however long the analysis took.
-//
-//Inspector mode is kept for quick iteration during development (drag a clip in, hit
-//play). Dynamic mode is the real path: the user picks any file and PRISM analyses it.
-//Note that inspector-assigned AudioClips have no file path on disk, so they cannot be
-//analysed - a clip must be loaded from a path.
+//AudioLoader//
+//PRISM's entry point Loads an audio file, runs analysis to completion, then starts synced playback and hands the loaded profile to PRISMGenerator//
+//Analysis must finish before audio starts or visuals desync//
 
 public class AudioLoader : MonoBehaviour
 {
@@ -48,7 +37,6 @@ public class AudioLoader : MonoBehaviour
 
         if (analyser == null)
         {
-            Debug.LogError("PRISM: AudioLoader has no AudioAnalyser assigned");
             return;
         }
 
@@ -69,8 +57,7 @@ public class AudioLoader : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("PRISM: no audio assigned - drag a clip into Inspector Clip, " +
-                             "or set a file path");
+            Debug.LogWarning("PRISM: no audio assigned - drag a clip into Inspector Clip, " + "or set a file path");
         }
     }
 
@@ -97,9 +84,6 @@ public class AudioLoader : MonoBehaviour
     {
         IsAnalysing = true;
 
-        //Analysis first. This can take a while on a long track (HPSS is the slow part),//
-        //so it runs as a coroutine and Unity keeps rendering throughout - show a loading//
-        //bar driven by analyser.StatusMessage.//
         yield return StartCoroutine(analyser.AnalyseFile(path));
 
         if (analyser.AnalysisFailed || !analyser.AnalysisComplete)
@@ -109,7 +93,6 @@ public class AudioLoader : MonoBehaviour
             yield break;
         }
 
-        //Now load the audio itself for playback.//
         yield return StartCoroutine(LoadClip(path));
 
         if (_loadedClip == null)
@@ -123,8 +106,6 @@ public class AudioLoader : MonoBehaviour
 
         _audioSource.clip = _loadedClip;
 
-        //Hand the analysed profile to the generator, THEN start the audio. The playhead//
-        //must be at zero when the generators first sample the timeline.//
         if (prism != null)
         {
             analyser.TimbralProfile.ResetPlayhead(0f);
@@ -157,8 +138,7 @@ public class AudioLoader : MonoBehaviour
             }
 
             _loadedClip = DownloadHandlerAudioClip.GetContent(request);
-            if (_loadedClip != null)
-                _loadedClip.name = Path.GetFileNameWithoutExtension(path);
+            if (_loadedClip != null) _loadedClip.name = Path.GetFileNameWithoutExtension(path);
         }
     }
 

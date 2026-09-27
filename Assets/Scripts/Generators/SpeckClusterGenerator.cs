@@ -1,5 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
+
+//SpeckClusterGenerator//
+//Klüver Category 7 (Small Circular Forms)//
+//Scatters small speck clusters filling the negative space of the track, Triggered by quietness squared (loudest in the quiet gaps)//
+
 public class SpeckClusterGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -43,7 +48,6 @@ public class SpeckClusterGenerator : MonoBehaviour
         _spawnAccumulator = 0f;
         _speckCount = 0;
 
-        Debug.Log("PRISM SpeckClusterGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

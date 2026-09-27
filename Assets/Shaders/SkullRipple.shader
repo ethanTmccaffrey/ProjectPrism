@@ -6,6 +6,7 @@ Shader "PRISM/SkullRipple"
         _RippleAmplitude ("Ripple Amplitude", Float) = 0.4
         _RippleWavelength ("Ripple Wavelength (radians)", Float) = 0.9
         _RippleTintStrength ("Ripple Tint Strength", Range(0,1)) = 0.85
+        _PaintEmissive ("Paint Emissive Boost", Float) = 1.0
         _Smoothness ("Smoothness", Range(0,1)) = 0.15
         [Toggle] _Unlit ("Unlit", Float) = 0
     }
@@ -13,7 +14,7 @@ Shader "PRISM/SkullRipple"
     SubShader
     {
         Tags { "RenderType"="Opaque" "RenderPipeline"="UniversalPipeline" }
-        Cull Off 
+        Cull Off   
 
         Pass
         {
@@ -31,14 +32,15 @@ Shader "PRISM/SkullRipple"
 
             #define MAX_RIPPLES 8
 
-            float4 _RippleDir[MAX_RIPPLES];   
-            float4 _RippleData[MAX_RIPPLES];   
+            float4 _RippleDir[MAX_RIPPLES];    
+            float4 _RippleData[MAX_RIPPLES];  
             float4 _RippleColour[MAX_RIPPLES]; 
 
-            float3 _HeadCentre;     
+            float3 _HeadCentre;                
             float  _RippleAmplitude;
             float  _RippleWavelength;
             float  _RippleTintStrength;
+            float  _PaintEmissive;
 
             float4 _BaseColor;
             float  _Smoothness;
@@ -47,8 +49,8 @@ Shader "PRISM/SkullRipple"
             struct Attributes
             {
                 float4 positionOS : POSITION;
-                float3 normalOS   : NORMAL;
-                float4 colour     : COLOR; 
+                float3 normalOS : NORMAL;
+                float4 colour : COLOR;   
             };
 
             struct Varyings
@@ -75,7 +77,7 @@ Shader "PRISM/SkullRipple"
 
                     float3 origin = _RippleDir[i].xyz;
                     float age      = _RippleData[i].x;
-                    float speed    = _RippleData[i].y;  
+                    float speed    = _RippleData[i].y; 
                     float lifetime = _RippleData[i].z;
 
                     float cosA = clamp(dot(dirFromCentre, origin), -1.0, 1.0);
@@ -130,7 +132,8 @@ Shader "PRISM/SkullRipple"
                 if (_Unlit > 0.5)
                 {
                     float paintA = smoothstep(0.35, 0.65, IN.vcolour.a);
-                    float3 base = lerp(_BaseColor.rgb, IN.vcolour.rgb, paintA);
+                    float3 paintCol = IN.vcolour.rgb * _PaintEmissive;   
+                    float3 base = lerp(_BaseColor.rgb, paintCol, paintA);
                     float3 c = lerp(base, IN.tint, saturate(IN.tintWeight) * _RippleTintStrength);
                     return half4(c, _BaseColor.a);
                 }
@@ -139,7 +142,8 @@ Shader "PRISM/SkullRipple"
                 float ndotl = saturate(dot(n, mainLight.direction));
 
                 float paintA = smoothstep(0.35, 0.65, IN.vcolour.a);
-                float3 painted = lerp(_BaseColor.rgb, IN.vcolour.rgb, paintA);
+                float3 paintCol = IN.vcolour.rgb * _PaintEmissive;  
+                float3 painted = lerp(_BaseColor.rgb, paintCol, paintA);
 
                 float3 ambient = SampleSH(n) * painted;
                 float3 diffuse = painted * mainLight.color * ndotl;

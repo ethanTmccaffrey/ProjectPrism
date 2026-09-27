@@ -1,6 +1,10 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 
+//RadiationBurstGenerator//
+//Klüver Category 4 (Cobwebs / Radial Forms)//
+//Fires radial bursts outward on transients, Triggered by percussiveness x rhythmic irregularity x energy//
+
 public class RadiationBurstGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -56,7 +60,6 @@ public class RadiationBurstGenerator : MonoBehaviour
         _burstCount = 0;
         _active = false;
 
-        Debug.Log("PRISM RadiationBurstGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

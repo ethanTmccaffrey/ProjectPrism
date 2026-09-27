@@ -1,53 +1,49 @@
 using System.Collections.Generic;
 using UnityEngine;
- 
-//TunnelDepthGenerator - Kluver Category 1 (Tunnels and Funnels)//
 
-//Builds a nested funnel receding down Z toward a vanishing point: a stack of concentric rings, each smaller and deeper than the last, connected by a translucent wall with brighter ring edges//
-//Introduces DEPTH as a visual language - recession into the scene - which no other generator uses.//
-
-//Timbral home (weight = tX*tF*tZ*(1-E+0.2)): sustained, tonal, smooth, dynamically restrained music - orchestral swells, ambient, drone, quiet classical//
-//So the funnel grows slowly and calmly, drawing the eye inward, not a rushing vortex//
-
-//Acoustic -> visual://
-//Continuous slow growth: one ring deeper over time while active (fits sustained music)//
-//Ring radius pulses with energy at birth: the wall breathes with the music's dynamics//
-//Colour: RealtimeColour at each ring's birth (records the song's colour down the bore)//
-//Prominence: mouth position (centrality) + overall scale (prominence)//
- 
+//TunnelDepthGenerator//
+//Klüver Category 1 (Tunnels / Funnels)//
+//Bores two mirrored tunnels inward through the cut eye sockets receding into the head, Triggered by sustain x tonality x sparseness at low energy//
 public class TunnelDepthGenerator : MonoBehaviour
 {
     [Header("Activation")]
     [SerializeField] private float activationThreshold = 0.15f;
 
+    [Header("Head Reference")]
+    [SerializeField] private HeadField head;
+
     [Header("Funnel Shape")]
-    //Radius of the tunnel mouth (nearest ring)//
-    [SerializeField] private float mouthRadius = 12f;
-    //How much each successive ring narrows (0.97 = gentle taper toward vanishing point)//
+    [SerializeField, Range(0.4f, 1.2f)] private float mouthRadiusFraction = 0.9f;
+    [SerializeField] private float fallbackMouthRadius = 6f;
     [SerializeField, Range(0.8f, 0.999f)] private float taper = 0.965f;
-    //Depth step between rings along Z//
     [SerializeField] private float depthStep = 2.5f;
-    //Corners per ring (higher = rounder)//
     [SerializeField] private int ringSegments = 24;
-    //Max rings before the funnel stops deepening//
     [SerializeField] private int maxRings = 120;
-    //Rings added per second at full energy (slow - this is contemplative)//
     [SerializeField] private float growthRate = 4f;
 
     [Header("Breathing")]
     [SerializeField] private float breathAmount = 0.25f;
 
-    [Header("Curve")]
-    [SerializeField] private float baseCurve = 3f;
-    [SerializeField] private float energyCurve = 8f;
-    [SerializeField, Range(0f, 0.9f)] private float headingBias = 0.6f;
-
-    [Header("Placement")]
-    [SerializeField] private float maxMouthOffset = 30f;
+    [Header("Bore Direction")]
+    [SerializeField] private float convergeDepth = 1.5f;
+    [SerializeField] private float baseCurve = 2f;
+    [SerializeField] private float energyCurve = 5f;
+    [SerializeField, Range(0f, 0.3f)] private float axisBias = 0.12f;
 
     [Header("Appearance")]
     [SerializeField, Range(0f, 0.5f)] private float wallOpacity = 0.1f;
     [SerializeField] private float edgeWidth = 0.1f;
+
+    private class Tunnel
+    {
+        public Vector3 axis;       
+        public Vector3 currentPos; 
+        public Vector3 heading;    
+        public float currentRadius;
+        public float steerPhase;
+        public int ringCount;
+        public Vector3[] prevRing;
+    }
 
     private GameObject _root;
     private PRISMGenerator _prism;
@@ -57,16 +53,7 @@ public class TunnelDepthGenerator : MonoBehaviour
     private bool _active = false;
     private bool _seeded = false;
     private float _growthAccumulator = 0f;
-
-    private Vector3 _mouthCentre;     
-    private Vector3 _axis;            
-    private Vector3 _currentPos;       
-    private Vector3 _heading;
-    private float _steerPhase = 0f;
-    private int _ringCount = 0;
-    private float _currentRadius;
-    private float _sizeScale = 1f;
-    private Vector3[] _prevRing;
+    private Tunnel[] _tunnels;
 
     public void SetPrism(PRISMGenerator prism)
     {
@@ -83,10 +70,8 @@ public class TunnelDepthGenerator : MonoBehaviour
         _active = false;
         _seeded = false;
         _growthAccumulator = 0f;
-        _ringCount = 0;
-        _prevRing = null;
+        _tunnels = null;
 
-        Debug.Log("PRISM TunnelDepthGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)
@@ -97,19 +82,36 @@ public class TunnelDepthGenerator : MonoBehaviour
         Prominence pr = _prism != null ? _prism.GetProminence(GeneratorID.TunnelDepth) : Prominence.Silent;
 
         if (!_active) return;
-        if (_ringCount >= maxRings) return;
 
-        if (!_seeded) SeedTunnel(pr);
+        if (!_seeded)
+        {
+            bool headReady = head != null && head.Loaded && head.HasMesh
+                             && head.FieldBounds.size.sqrMagnitude > 1e-3f;
+            if (!headReady) return;
+            SeedTunnels(pr);
+        }
+        if (_tunnels == null) return;
 
-        //Continuous slow growth. Note the funnel deepens even in quiet passages (itstimbral home is quiet), so growth is time-based, only gently scaled by energy//
+        bool anyGrowing = false;
+        for (int t = 0; t < _tunnels.Length; t++)
+        {
+            if (_tunnels[t].ringCount < maxRings) { anyGrowing = true; break; }
+        }
+        if (!anyGrowing) return;
+
         float rate = growthRate * Mathf.Lerp(0.5f, 1.5f, profile.RealtimeEnergy);
         _growthAccumulator += rate * Time.deltaTime;
         int ticks = Mathf.FloorToInt(_growthAccumulator);
         if (ticks <= 0) return;
         _growthAccumulator -= ticks;
 
-        for (int i = 0; i < ticks && _ringCount < maxRings; i++)
-            AddRing(profile);
+        for (int i = 0; i < ticks; i++)
+        {
+            for (int t = 0; t < _tunnels.Length; t++)
+            {
+                if (_tunnels[t].ringCount < maxRings) AddRing(_tunnels[t], profile);
+            }
+        }
     }
 
     public void Deactivate()
@@ -117,49 +119,91 @@ public class TunnelDepthGenerator : MonoBehaviour
         _active = false;
     }
 
-    private void SeedTunnel(Prominence pr)
+    private void SeedTunnels(Prominence pr)
     {
-        _mouthCentre = transform.position + Random.onUnitSphere * (maxMouthOffset * (1f - pr.centrality));
-        Vector3 tilt = new Vector3(Random.Range(-0.5f, 0.5f), Random.Range(-0.5f, 0.5f), 1f);
-        _axis = tilt.normalized;
-        _heading = _axis;
-        _currentPos = _mouthCentre;
+        float sizeScale = Mathf.Lerp(0.5f, 1.2f, pr.prominence);
 
-        _sizeScale = Mathf.Lerp(0.5f, 1.2f, pr.prominence);
-        _currentRadius = mouthRadius * _sizeScale;
-        _ringCount = 0;
-        _prevRing = null;
+        bool haveEyes = head != null && head.Loaded && head.EyeCutEnabled;
+
+        Vector3 leftMouth, rightMouth, centre;
+        float mouthRadius;
+
+        if (haveEyes)
+        {
+            leftMouth = head.LeftEyeWorld;
+            rightMouth = head.RightEyeWorld;
+            mouthRadius = head.EyeRadiusWorld * mouthRadiusFraction;
+
+            Vector3 mid = (leftMouth + rightMouth) * 0.5f;
+            Vector3 intoHead = (head.transform.position - mid);
+            if (intoHead.sqrMagnitude < 1e-3f)
+            {
+                Vector3 across = (rightMouth - leftMouth).normalized;
+                intoHead = Vector3.Cross(across, Vector3.up);
+            }
+            intoHead.Normalize();
+            float eyeGap = Vector3.Distance(leftMouth, rightMouth);
+            centre = mid + intoHead * (eyeGap * convergeDepth);
+        }
+        else
+        {
+            centre = transform.position;
+            leftMouth = centre + Vector3.left * 10f + Vector3.up * 4f + Vector3.forward * 12f;
+            rightMouth = centre + Vector3.right * 10f + Vector3.up * 4f + Vector3.forward * 12f;
+            mouthRadius = fallbackMouthRadius;
+        }
+
+        _tunnels = new Tunnel[2];
+        _tunnels[0] = MakeTunnel(leftMouth, centre, mouthRadius * sizeScale);
+        _tunnels[1] = MakeTunnel(rightMouth, centre, mouthRadius * sizeScale);
         _seeded = true;
     }
 
-    private void AddRing(TimbralProfile profile)
+    private Tunnel MakeTunnel(Vector3 mouth, Vector3 centre, float radius)
     {
-        //Breathing: energy at birth nudges this ring's radius//
+        Vector3 inward = (centre - mouth);
+        if (inward.sqrMagnitude < 1e-4f) inward = Vector3.forward;
+        inward.Normalize();
+
+        return new Tunnel
+        {
+            axis = inward,
+            heading = inward,
+            currentPos = mouth,
+            currentRadius = radius,
+            steerPhase = Random.Range(0f, 100f),
+            ringCount = 0,
+            prevRing = null
+        };
+    }
+
+    private void AddRing(Tunnel tun, TimbralProfile profile)
+    {
         float breath = 1f + (profile.RealtimeEnergy - 0.5f) * 2f * breathAmount;
-        float radius = _currentRadius * Mathf.Max(0.05f, breath);
+        float radius = tun.currentRadius * Mathf.Max(0.05f, breath);
         float turnDeg = baseCurve + energyCurve * profile.RealtimeEnergy;
-        Vector3 refUp = Mathf.Abs(Vector3.Dot(_heading, _axis)) > 0.99f ? Vector3.right : _axis;
-        Vector3 right = Vector3.Cross(_heading, refUp).normalized;
-        Vector3 up = Vector3.Cross(right, _heading).normalized;
-        _steerPhase += Time.deltaTime * (0.3f + profile.RealtimeEnergy);
-        float steerX = (Mathf.PerlinNoise(_steerPhase, profile.RealtimeCentroid) - 0.5f) * 2f;
-        float steerY = (Mathf.PerlinNoise(profile.RealtimeFlatness, _steerPhase) - 0.5f) * 2f;
+
+        Vector3 refUp = Mathf.Abs(Vector3.Dot(tun.heading, tun.axis)) > 0.99f ? Vector3.right : tun.axis;
+        Vector3 right = Vector3.Cross(tun.heading, refUp).normalized;
+        Vector3 up = Vector3.Cross(right, tun.heading).normalized;
+
+        tun.steerPhase += Time.deltaTime * (0.3f + profile.RealtimeEnergy);
+        float steerX = (Mathf.PerlinNoise(tun.steerPhase, profile.RealtimeCentroid) - 0.5f) * 2f;
+        float steerY = (Mathf.PerlinNoise(profile.RealtimeFlatness, tun.steerPhase) - 0.5f) * 2f;
         Vector3 steer = right * steerX + up * steerY;
         if (steer.sqrMagnitude < 1e-4f) steer = right;
 
-        _heading = Vector3.RotateTowards(_heading, (_heading + steer.normalized).normalized,
-                                         turnDeg * Mathf.Deg2Rad, 0f).normalized;
+        tun.heading = Vector3.RotateTowards(tun.heading, (tun.heading + steer.normalized).normalized, turnDeg * Mathf.Deg2Rad, 0f).normalized;
 
-        //Gently bias back toward the original axis so it keeps generally receding.//
-        _heading = Vector3.Slerp(_heading, _axis, headingBias * 0.02f).normalized;
+        tun.heading = Vector3.Slerp(tun.heading, tun.axis, axisBias).normalized;
 
-        _currentPos += _heading * depthStep;
-        Vector3 centre = _currentPos;
+        tun.currentPos += tun.heading * depthStep;
+        Vector3 centre = tun.currentPos;
 
-        Vector3 ringRight = Vector3.Cross(_heading, Vector3.up);
-        if (ringRight.sqrMagnitude < 1e-4f) ringRight = Vector3.Cross(_heading, Vector3.right);
+        Vector3 ringRight = Vector3.Cross(tun.heading, Vector3.up);
+        if (ringRight.sqrMagnitude < 1e-4f) ringRight = Vector3.Cross(tun.heading, Vector3.right);
         ringRight.Normalize();
-        Vector3 ringUp = Vector3.Cross(ringRight, _heading).normalized;
+        Vector3 ringUp = Vector3.Cross(ringRight, tun.heading).normalized;
 
         Vector3[] ring = new Vector3[ringSegments];
         for (int i = 0; i < ringSegments; i++)
@@ -170,21 +214,16 @@ public class TunnelDepthGenerator : MonoBehaviour
 
         Color colour = _prism != null ? _prism.RealtimeColour : Color.cyan;
 
-        //Edge loop for this ring//
         BuildRingEdge(ring, colour);
 
-        //Wall band connecting the previous ring to this one//
-        if (_prevRing != null && wallOpacity > 0f)
-            BuildWallBand(_prevRing, ring, colour);
+        if (tun.prevRing != null && wallOpacity > 0f) BuildWallBand(tun.prevRing, ring, colour);
 
-        _prevRing = ring;
-        _ringCount++;
+        tun.prevRing = ring;
+        tun.ringCount++;
 
-        //Narrow toward the vanishing point for the next ring//
-        _currentRadius *= taper;
+        tun.currentRadius *= taper;
     }
 
-    //Thin ring outline as a closed LineRenderer//
     private void BuildRingEdge(Vector3[] ring, Color colour)
     {
         GameObject go = new GameObject("RingEdge");
@@ -203,8 +242,6 @@ public class TunnelDepthGenerator : MonoBehaviour
         lr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         lr.receiveShadows = false;
     }
-
-    //Translucent quad band between two consecutive rings (the funnel wall segment)//
     private void BuildWallBand(Vector3[] a, Vector3[] b, Color colour)
     {
         int seg = a.Length;
@@ -245,12 +282,10 @@ public class TunnelDepthGenerator : MonoBehaviour
     {
         Shader unlit = Shader.Find("Universal Render Pipeline/Unlit");
 
-        //Edges: sprites shader so LineRenderer vertex colours show//
         Shader lineShader = Shader.Find("Sprites/Default");
         if (lineShader == null) lineShader = unlit;
         _edgeMaterial = new Material(lineShader);
 
-        //Wall: transparent unlit, double-sided so the tunnel shows from inside and out//
         _wallMaterial = new Material(unlit);
         _wallMaterial.SetFloat("_Surface", 1f);
         _wallMaterial.SetFloat("_Blend", 0f);
@@ -266,5 +301,19 @@ public class TunnelDepthGenerator : MonoBehaviour
     {
         if (_wallMaterial != null) Destroy(_wallMaterial);
         if (_edgeMaterial != null) Destroy(_edgeMaterial);
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (head == null) return;
+        if (!head.Loaded || !head.EyeCutEnabled) return;
+
+        Vector3 L = head.LeftEyeWorld;
+        Vector3 R = head.RightEyeWorld;
+        Gizmos.color = Color.green;
+        Gizmos.DrawWireSphere(L, head.EyeRadiusWorld);
+        Gizmos.DrawWireSphere(R, head.EyeRadiusWorld);
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawLine(L, R);
     }
 }

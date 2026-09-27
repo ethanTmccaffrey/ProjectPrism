@@ -1,6 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//OrganicClusterGenerator//
+//Klüver Category 7 (Small Circular Forms)//
+//Scatters small organic cluster forms into the quiet gaps of a track, Triggered by tonality x sustain x quietness//
 public class OrganicClusterGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -56,7 +59,6 @@ public class OrganicClusterGenerator : MonoBehaviour
         _completedCount = 0;
         _growing.Clear();
 
-        Debug.Log("PRISM OrganicClusterGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

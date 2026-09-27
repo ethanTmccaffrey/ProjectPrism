@@ -1,12 +1,15 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//SkullRipple//
+//URP vertex/fragment shader for the head//
+//Displaces the mesh along its normals with beat-driven angular ripples radiating from the head centre, blends generator vertex-paint over the bone via smoothstep with an HDR _PaintEmissive boost, and supports a lit/unlit toggle for the two-shell outer/void pair//
+
 public class SkullRipple : MonoBehaviour
 {
     private const int MAX_RIPPLES = 8;
 
     [Header("Source")]
-
     [SerializeField] private HeadField head;
     [SerializeField] private PRISMGenerator prism;
     [SerializeField] private GameObject[] targetObjects;
@@ -29,10 +32,10 @@ public class SkullRipple : MonoBehaviour
 
     private struct Ripple
     {
-        public Vector3 dir;
+        public Vector3 dir;  
         public float strength; 
         public float age; 
-        public Color colour; 
+        public Color colour;     
     }
 
     private readonly Ripple[] _ripples = new Ripple[MAX_RIPPLES];
@@ -51,6 +54,7 @@ public class SkullRipple : MonoBehaviour
         float strength = Mathf.Clamp01(energy);
         SpawnRipple(dir.normalized, strength, colour);
     }
+
     public void TriggerBothEars(float energy, Color colour)
     {
         TriggerRipple(leftOrigin, energy, colour);
@@ -68,7 +72,7 @@ public class SkullRipple : MonoBehaviour
     private void Update()
     {
         float dt = Time.deltaTime;
-        float speed = Mathf.PI / Mathf.Max(0.01f, sweepSeconds);
+        float speed = Mathf.PI / Mathf.Max(0.01f, sweepSeconds);  
 
         for (int i = 0; i < MAX_RIPPLES; i++)
         {
@@ -76,12 +80,10 @@ public class SkullRipple : MonoBehaviour
             {
                 _ripples[i].age += dt;
                 if (_ripples[i].age >= lifetime)
-                {
                     _ripples[i].strength = 0f;
-                }
             }
 
-            _dir[i] = new Vector4(_ripples[i].dir.x, _ripples[i].dir.y, _ripples[i].dir.z,_ripples[i].strength);
+            _dir[i] = new Vector4(_ripples[i].dir.x, _ripples[i].dir.y, _ripples[i].dir.z, _ripples[i].strength);
             _data[i] = new Vector4(_ripples[i].age, speed, lifetime, 0f);
             Color c = _ripples[i].colour;
             _colour[i] = new Vector4(c.r, c.g, c.b, 1f);

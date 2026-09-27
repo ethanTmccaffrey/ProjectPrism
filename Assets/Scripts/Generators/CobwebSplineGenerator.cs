@@ -1,5 +1,10 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+
+//CobwebSplineGenerator//
+//Klüver Category 4 (Cobwebs / Radial Forms)//
+//Draws radial cobweb splines, Triggered by harmonic complexity x sqrt(flatness) x sustain (inverse percussiveness)//
+
 public class CobwebSplineGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -64,7 +69,6 @@ public class CobwebSplineGenerator : MonoBehaviour
         _seeded = false;
         _active = false;
 
-        Debug.Log("PRISM CobwebSplineGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

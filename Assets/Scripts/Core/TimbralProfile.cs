@@ -1,53 +1,31 @@
 using System;
 using UnityEngine;
 
-//TimbralProfile holds all acoustic measurements for the loaded track and derives the
-//generator weights from them.
-//
-//ARCHITECTURE NOTE - this class no longer MEASURES anything.
-//
-//All acoustic analysis now happens offline, before playback, in prism_analyse.py using
-//librosa (McFee et al. 2015). Unity loads the resulting JSON and plays it back in sync
-//with the audio, so at runtime this class is a LOOKUP TABLE, not a DSP engine.
-//
-//Why the change: the previous realtime layer computed every measurement from a single
-//1024-bin FFT frame - a photograph of one instant of sound. Validated against four
-//tracks of known character, no frame-local spectral measure could separate them:
-//flatness, inharmonicity, ZCR and centroid all had overlapping ranges on tracks that
-//sound nothing alike. Freeze any dense mix at any instant and it looks the same:
-//"loud, energy everywhere". The information that distinguishes songs is TEMPORAL -
-//attack, articulation, regularity, whether the music breathes or never lets up - and it
-//cannot be read from a single frame by construction.
-//
-//The measures that DID separate the tracks (rhythmic regularity, onset density,
-//percussive ratio, dynamic range) are all computed over a WINDOW of time. That is the
-//finding, and it is why analysis moved offline: given the whole track up front, these
-//can be computed properly rather than approximated frame by frame.
-//
-//PRISM is a persistent canvas and the song is fully known before playback begins, so
-//nothing about the architecture ever required live measurement.
-//
-//References:
-//  McFee et al. (2015)      - librosa
-//  Dubnov (2004)            - spectral flatness
-//  Schubert et al. (2004)   - spectral centroid
-//  Fitzgerald (2010)        - harmonic/percussive separation
-//  Ellis (2007)             - beat tracking
-//  Kluver (1926)            - form constants
-//  Cytowic (2002), Marks (1974) - cross-modal correspondence
+//TimbralProfile holds all acoustic measurements for the loaded track and derives the generator weights from them//
+//All acoustic analysis now happens offline, before playback, in prism_analyse.py using librosa (McFee et al. 2015)//
+//Unity loads the resulting JSON and plays it back in sync with the audio, so at runtime this class is a LOOKUP TABLE, not a DSP engine//
+
+//References://
+//McFee et al. (2015) - librosa//
+//Dubnov (2004) - spectral flatness//
+//Schubert et al. (2004) - spectral centroid//
+//Fitzgerald (2010) - harmonic/percussive separation//
+//Ellis (2007) - beat tracking//
+//Kluver (1926) - form constants//
+//Cytowic (2002), Marks (1974) - cross-modal correspondence//
 
 public class TimbralProfile
 {
     //Static measurements: the character of the track as a whole//
-    public float StaticFlatness { get; private set; }            //0 = tonal, 1 = noisy//
-    public float StaticCentroid { get; private set; }            //0 = dark, 1 = bright//
+    public float StaticFlatness { get; private set; } //0 = tonal, 1 = noisy//
+    public float StaticCentroid { get; private set; }  //0 = dark, 1 = bright//
     public float StaticHarmonicComplexity { get; private set; }  //0 = simple, 1 = complex//
-    public float StaticPercussiveness { get; private set; }      //0 = sustained, 1 = percussive//
-    public float StaticRhythmicRegularity { get; private set; }  //0 = irregular, 1 = metronomic//
-    public float StaticStereoWidth { get; private set; }         //0 = mono, 1 = wide//
-    public float StaticDynamicRange { get; private set; }        //0 = compressed, 1 = wide swings//
-    public float StaticOnsetDensity { get; private set; }        //0 = sparse, 1 = relentless//
-    public float StaticTempo { get; private set; }               //BPM//
+    public float StaticPercussiveness { get; private set; }//0 = sustained, 1 = percussive//
+    public float StaticRhythmicRegularity { get; private set; } //0 = irregular, 1 = metronomic//
+    public float StaticStereoWidth { get; private set; } //0 = mono, 1 = wide//
+    public float StaticDynamicRange { get; private set; } //0 = compressed, 1 = wide swings//
+    public float StaticOnsetDensity { get; private set; } //0 = sparse, 1 = relentless//
+    public float StaticTempo { get; private set; } //BPM//
 
     //Realtime measurements: sampled from the timeline at the current playback position//
     public float RealtimeFlatness { get; private set; }
@@ -58,8 +36,8 @@ public class TimbralProfile
     public float RealtimeEnergy { get; private set; }
 
     //The three temporal measures. These are the ones that actually distinguish tracks.//
-    public float RealtimePercussiveRatio { get; private set; }    //HPSS: transient vs tonal//
-    public float RealtimeOnsetDensity { get; private set; }       //attacks in the recent past//
+    public float RealtimePercussiveRatio { get; private set; } //HPSS: transient vs tonal//
+    public float RealtimeOnsetDensity { get; private set; } //attacks in the recent past//
     public float RealtimeRhythmicRegularity { get; private set; } //rolling beat autocorrelation//
 
     //Frequency band balance, used for colour derivation//
@@ -67,35 +45,11 @@ public class TimbralProfile
     public float RealtimeBandMid { get; private set; }
     public float RealtimeBandHigh { get; private set; }
 
-    //Raw flux for anything still doing its own onset detection. Prefer IsBeat()/IsOnset()//
     public float RealtimeFluxRaw => RealtimeFlux;
 
-    //True on the frame a beat/onset occurs. Replaces every generator's private adaptive//
-    //onset detector: they each kept their own flux history, their own threshold and their//
-    //own refractory period, and they all disagreed with each other. One source of truth.//
     public bool BeatThisFrame { get; private set; }
     public bool OnsetThisFrame { get; private set; }
 
-    //ZCR: REMOVED.
-    //Tested as a grit/roughness measure and rejected with evidence. ZCR counts sign
-    //changes in the waveform, so it reports "noisy", not "distorted" - and an orchestra
-    //is acoustically very noisy (dozens of slightly detuned players, bow noise, hall
-    //reverb). Measured across four tracks it ranked Sogno di Volare (orchestral) as the
-    //ROUGHEST of the set, above Duality (metal). Energy-gating reduced but did not fix
-    //this, because the problem is not quiet frames - loud massed strings genuinely have a
-    //high zero-crossing rate.
-    //
-    //Spectral flatness and spectral inharmonicity were tested for the same role and also
-    //rejected: on Duality vs Sandstorm their ranges overlapped almost completely (raw
-    //inharmonicity ratio 0.19-0.44 vs 0.22-0.33). A detuned supersaw stack fills the
-    //valleys between its partials just as thoroughly as guitar distortion does.
-    //
-    //Three measures, three failures, one conclusion: no frame-local spectral statistic
-    //isolates distortion from dense synthesis. The angular/jagged quality ZCR was serving
-    //is better carried by RealtimePercussiveRatio (HPSS-derived, ranks Duality highest and
-    //Sogno lowest - the correct order) combined with rhythmic irregularity.
-
-    //Generator weights, recomputed every frame from the sampled measurements//
     public float[] Weights { get; private set; } = new float[(int)GeneratorID.Count];
 
     //Category 1: Tunnels and Funnels//
@@ -121,11 +75,9 @@ public class TimbralProfile
     //Category 5: Parallel Figures//
     public float WeightZigzagParallel { get; private set; }
     public float WeightWavyParallel { get; private set; }
-    public float WeightHatching { get; private set; }
 
     //Category 6: Wavy Lines and Amorphous Forms//
     public float WeightFluidTendril { get; private set; }
-    public float WeightAmorphousSpeck { get; private set; }
     public float WeightBilateralDuplication { get; private set; }
 
     //Category 7: Small Circular Figures//
@@ -139,8 +91,6 @@ public class TimbralProfile
     public bool Loaded { get; private set; } = false;
     public float Duration => _data != null ? _data.source.duration : 0f;
 
-    //Beat/onset playheads: both lists are sorted, so we walk them forward rather than//
-    //searching. O(1) per frame.//
     private int _beatCursor = 0;
     private int _onsetCursor = 0;
     private float _lastSampleTime = 0f;
@@ -194,22 +144,16 @@ public class TimbralProfile
         Debug.Log($"Onset Density: {StaticOnsetDensity:F3}  (0=sparse, 1=relentless)");
         Debug.Log($"Dynamic Range: {StaticDynamicRange:F3}  (0=compressed, 1=wide)");
         Debug.Log($"Stereo Width: {StaticStereoWidth:F3}  (0=mono, 1=wide)");
-        Debug.Log($"Beats: {(_data.beats != null ? _data.beats.Length : 0)}  " +
-                  $"Onsets: {(_data.onsets != null ? _data.onsets.Length : 0)}");
+        Debug.Log($"Beats: {(_data.beats != null ? _data.beats.Length : 0)}  " + $"Onsets: {(_data.onsets != null ? _data.onsets.Length : 0)}");
 
         return true;
     }
 
     //Sampling//
-
-    //Called once per frame by PRISMGenerator with the current playback position.//
-    //Reads the timeline, populates the Realtime* fields, recomputes all weights.//
     public void SampleAt(float time)
     {
         if (!Loaded) return;
 
-        //Linear interpolation between frames, so a 60fps render reading an 86fps timeline//
-        //gets a smooth value rather than stepping.//
         float exact = time * _frameRate;
         int i = Mathf.Clamp(Mathf.FloorToInt(exact), 0, _frameCount - 1);
         int j = Mathf.Min(i + 1, _frameCount - 1);
@@ -230,7 +174,6 @@ public class TimbralProfile
         RealtimeBandMid = Lerp(f.band_mid, i, j, t);
         RealtimeBandHigh = Lerp(f.band_high, i, j, t);
 
-        //Beat and onset flags: true if an event falls between the last sample and now.//
         BeatThisFrame = Advance(_data.beats, ref _beatCursor, _lastSampleTime, time);
         OnsetThisFrame = Advance(_data.onsets, ref _onsetCursor, _lastSampleTime, time);
         _lastSampleTime = time;
@@ -238,7 +181,6 @@ public class TimbralProfile
         UpdateWeights();
     }
 
-    //Call if playback is scrubbed or restarted, so the beat cursors don't get stranded.//
     public void ResetPlayhead(float time = 0f)
     {
         _beatCursor = 0;
@@ -259,11 +201,10 @@ public class TimbralProfile
         return Mathf.Lerp(a[i], a[j], t);
     }
 
-    //Walks a sorted timestamp list forward, returning true if any event fell in (from, to].//
     private static bool Advance(float[] times, ref int cursor, float from, float to)
     {
         if (times == null || cursor >= times.Length) return false;
-        if (to < from) return false; //looped or scrubbed backwards//
+        if (to < from) return false; 
 
         bool hit = false;
         while (cursor < times.Length && times[cursor] <= to)
@@ -276,25 +217,24 @@ public class TimbralProfile
 
     //Weight Derivation//
 
-    //Each weight maps the measurements to a 0-1 activation strength for one generator.
-    //Grounded in Kluver's form constants and cross-modal correspondence research.
+    //Each weight maps the measurements to a 0-1 activation strength for one generator, grounded in Kluver's form constants and cross-modal correspondence research//
     private void UpdateWeights()
     {
-        float F = RealtimeFlatness;              //noisy / dense//
-        float C = RealtimeCentroid;              //bright//
-        float H = RealtimeHarmonicComplexity;    //harmonically complex//
-        float X = RealtimeFlux;                  //spectral change//
-        float S = RealtimeStereoWidth;           //wide//
-        float E = RealtimeEnergy;                //loud//
-        float P = RealtimePercussiveRatio;       //transient / attack-driven//
-        float D = RealtimeOnsetDensity;          //relentless//
-        float R = RealtimeRhythmicRegularity;    //metronomic//
+        float F = RealtimeFlatness; //noisy / dense//
+        float C = RealtimeCentroid;  //bright//
+        float H = RealtimeHarmonicComplexity;//harmonically complex//
+        float X = RealtimeFlux;  //spectral change//
+        float S = RealtimeStereoWidth;  //wide//
+        float E = RealtimeEnergy;//loud//
+        float P = RealtimePercussiveRatio; //transient / attack-driven//
+        float D = RealtimeOnsetDensity; //relentless//
+        float R = RealtimeRhythmicRegularity; //metronomic//
 
-        float tF = 1f - F;   //tonal//
-        float tC = 1f - C;   //dark//
-        float tP = 1f - P;   //sustained//
-        float tD = 1f - D;   //sparse, breathing//
-        float tR = 1f - R;   //irregular//
+        float tF = 1f - F; //tonal//
+        float tC = 1f - C; //dark//
+        float tP = 1f - P; //sustained//
+        float tD = 1f - D; //sparse, breathing//
+        float tR = 1f - R; //irregular//
 
         //Category 1: Tunnels and Funnels//
         //Sustained, tonal, dynamic - orchestral, ambient, drone//
@@ -309,21 +249,14 @@ public class TimbralProfile
 
         //Category 3: Lattices and Honeycombs//
         //Regular, synthetic, gridded - electronic, EDM//
-        //Honeycomb wants the CLEAN synthetic wall: regular, dense, relentless.//
+        //Honeycomb wants the CLEAN synthetic wall: regular, dense, relentless//
         WeightHoneycomb = Sat(R * F * D);
-        //GridGrating is the architectural sibling: regular AND percussive - the beat//
-        //literally builds the structure.//
+        //GridGrating is the architectural sibling: regular AND percussive the beat//
         WeightGridGrating = Sat(R * P * Mathf.Lerp(0.6f, 1f, C));
         WeightFiligree = Sat(H * Mathf.Lerp(0f, 1f, F * 0.5f + 0.2f));
         WeightReduplication = Sat(R * R * tF);
 
         //Category 4: Cobwebs and Radial Forms//
-        //Fracture is aggression: it HITS HARD at UNPREDICTABLE intervals. Percussive but
-        //irregular. That is Duality (P=0.46, R=0.18) and explicitly NOT Sandstorm
-        //(P=0.40, R=0.72), which hits just as hard but on a perfect grid - that belongs
-        //to GridGrating. This is the carve-up that flatness, inharmonicity and ZCR all
-        //failed to make: the difference is not tone colour, it is whether the music is
-        //predictable.
         WeightFracture = Sat(P * tR);
         WeightRadiationBurst = Sat(P * tR * E);
         WeightCobwebSpline = Sat(H * Mathf.Sqrt(F) * tP);
@@ -331,12 +264,10 @@ public class TimbralProfile
         //Category 5: Parallel Figures//
         WeightZigzagParallel = Sat(P * R * Mathf.Sqrt(F));
         WeightWavyParallel = Sat(tF * tP * tD);
-        WeightHatching = Sat(tF * P * R);
 
         //Category 6: Wavy Lines and Amorphous Forms//
-        //Organic, flowing, sustained - folk, soul, strings//
+        //Organic, flowing, sustained = folk, soul, strings//
         WeightFluidTendril = Sat(tF * tP);
-        WeightAmorphousSpeck = Sat(tR * tF * E);
         WeightBilateralDuplication = Sat(S * E);
 
         //Category 7: Small Circular Figures//
@@ -359,19 +290,13 @@ public class TimbralProfile
         Weights[(int)GeneratorID.CobwebSpline] = WeightCobwebSpline;
         Weights[(int)GeneratorID.ZigzagParallel] = WeightZigzagParallel;
         Weights[(int)GeneratorID.WavyParallel] = WeightWavyParallel;
-        Weights[(int)GeneratorID.Hatching] = WeightHatching;
         Weights[(int)GeneratorID.FluidTendril] = WeightFluidTendril;
-        Weights[(int)GeneratorID.AmorphousSpeck] = WeightAmorphousSpeck;
         Weights[(int)GeneratorID.BilateralDuplication] = WeightBilateralDuplication;
         Weights[(int)GeneratorID.SpeckCluster] = WeightSpeckCluster;
         Weights[(int)GeneratorID.OrganicCluster] = WeightOrganicCluster;
     }
 
     private static float Sat(float v) => Mathf.Clamp01(v);
-
-    //JSON schema. Field names must match prism_analyse.py exactly.//
-    //"static" is a C# keyword, so the field is named "stat" - see AudioAnalyser, which//
-    //rewrites the key before parsing.//
 
     [Serializable]
     public class AnalysisData

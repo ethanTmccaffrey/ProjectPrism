@@ -1,22 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-//BilateralDuplicationGenerator - Kluver Category 6 (Wavy/Amorphous, duplication subcategory)//
+//BilateralDuplicationGenerator//
+//Klüver Category 6 (Wavy Lines / Amorphous)//
+//Fires mirrored marks outward from the two stereo ear source points, Triggered by stereo width x energy//
 
-//Fires bursts of BUTTERFLIES from the stereo source points, alternating left ear then right ear on successive beats//
-//Each butterfly glides into the scene with its own velocity, slows, and settles permanently where it lands//
-
-//The butterfly form carries bilateral symmetry INTRINSICALLY — two mirrored wings about a shared body — which is the point of the category//
-//An earlier version spawned mirrored pairs of geometric marks far apart in space, but the mirroring was invisible: you could never see both halves at once, so nothing read as symmetric//
-//Here the symmetry is unmissable in every single mark//
-
-//This is the only generator driven by stereo width (weight = S * E), the only one that uses the stereo source points, and the only one with motion at birth//
-
-//Launch point: alternates between the left and right source points on each burst, so the scene visibly ping-pongs between the two ears//
-//Butterfly count: scales with stereo width — a wide mix throws a big flock, a narrow one only a few. Width becomes visible as the density of the burst//
-//Motion: glide in with random velocity, slow under drag, then settle permanently (motion at birth, then the persistent canvas holds)//
-//Colour: RealtimeColour at spawn//
-//Prominence: flock size + butterfly scale//
 
 public class BilateralDuplicationGenerator : MonoBehaviour
 {
@@ -30,15 +18,17 @@ public class BilateralDuplicationGenerator : MonoBehaviour
     [SerializeField] private float fallbackTrackSeconds = 180f;
 
     [Header("Butterfly")]
-    [SerializeField] private float minSize = 0.6f;
-    [SerializeField] private float maxSize = 1.6f;
+    [SerializeField] private float minSize = 6f;
+    [SerializeField] private float maxSize = 16f;
 
     [Header("Flight")]
     [SerializeField] private float minLaunchSpeed = 8f;
     [SerializeField] private float maxLaunchSpeed = 22f;
     [SerializeField] private float drag = 1.4f;
     [SerializeField] private float settleSpeed = 0.4f;
-    [SerializeField, Range(0f, 1.5f)] private float launchSpread = 1.1f;
+
+    [SerializeField, Range(0f, 2f)] private float launchSpread = 1.6f;
+    [SerializeField, Range(0f, 1f)] private float forwardBias = 0.35f;
 
     [Header("Stereo Event Detection")]
     [SerializeField] private int widthHistorySize = 43;
@@ -81,7 +71,6 @@ public class BilateralDuplicationGenerator : MonoBehaviour
         _active = false;
         _nextIsLeft = true;
 
-        Debug.Log("PRISM BilateralDuplicationGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)
@@ -141,17 +130,19 @@ public class BilateralDuplicationGenerator : MonoBehaviour
         count = Mathf.RoundToInt(count * Mathf.Lerp(0.5f, 1f, pr.prominence));
         count = Mathf.Max(1, count);
 
-        Vector3 inward = (transform.position - source).normalized;
-        if (inward.sqrMagnitude < 1e-4f) inward = Vector3.forward;
+        Vector3 outward = (source - transform.position).normalized;
+        if (outward.sqrMagnitude < 1e-4f) outward = Vector3.forward;
 
         Color colour = _prism != null ? _prism.RealtimeColour : Color.white;
         float sizeScale = Mathf.Lerp(0.6f, 1f, pr.prominence);
 
         for (int i = 0; i < count && _butterflyCount < maxButterflies; i++)
-            SpawnButterfly(source, inward, profile, colour, sizeScale);
+        {
+            SpawnButterfly(source, outward, profile, colour, sizeScale);
+        }
     }
 
-    private void SpawnButterfly(Vector3 source, Vector3 inward, TimbralProfile profile, Color colour, float sizeScale)
+    private void SpawnButterfly(Vector3 source, Vector3 outward, TimbralProfile profile, Color colour, float sizeScale)
     {
         GameObject b = new GameObject("Butterfly");
         b.transform.SetParent(_root.transform);
@@ -169,7 +160,8 @@ public class BilateralDuplicationGenerator : MonoBehaviour
         mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         mr.receiveShadows = false;
 
-        Vector3 dir = (inward + Random.onUnitSphere * launchSpread).normalized;
+        Vector3 biased = (outward + Vector3.forward * forwardBias).normalized;
+        Vector3 dir = (biased + Random.onUnitSphere * launchSpread).normalized;
         float speed = Random.Range(minLaunchSpeed, maxLaunchSpeed);
 
         var glide = b.AddComponent<ButterflyGlide>();
@@ -183,8 +175,6 @@ public class BilateralDuplicationGenerator : MonoBehaviour
     {
         Mesh m = new Mesh();
 
-        //Wing outline, built once for the right wing then mirrored on X for the left//
-        //Simple stylised butterfly: upper lobe + lower lobe per side//
         Vector3[] verts = new Vector3[]
         {
             //0: body centre//
@@ -261,7 +251,7 @@ public class ButterflyGlide : MonoBehaviour
         _velocity *= Mathf.Exp(-_drag * dt);
 
         _flutterPhase += dt * 3f;
-        Vector3 flutter = new Vector3(Mathf.Sin(_flutterPhase * 1.3f),Mathf.Cos(_flutterPhase * 0.9f), Mathf.Sin(_flutterPhase * 0.7f)) * _flutterAmount;
+        Vector3 flutter = new Vector3(Mathf.Sin(_flutterPhase * 1.3f), Mathf.Cos(_flutterPhase * 0.9f), Mathf.Sin(_flutterPhase * 0.7f)) * _flutterAmount;
 
         transform.position += (_velocity + flutter) * dt;
 
@@ -275,7 +265,7 @@ public class ButterflyGlide : MonoBehaviour
         if (_velocity.magnitude < _settleSpeed)
         {
             _settled = true;
-            enabled = false; 
+            enabled = false;
         }
     }
 }

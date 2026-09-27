@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//RotationFieldGenerator//
+//Klüver Category 2 (Spirals)//
+//Places rotating vortex fields, Triggered by harmonic complexity x rhythmic regularity x mid-flatness (peaks when flatness is neither fully tonal nor fully noisy)//
+
 public class RotationFieldGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -98,7 +102,6 @@ public class RotationFieldGenerator : MonoBehaviour
         _growing.Clear();
         _bands.Clear();
 
-        Debug.Log("PRISM RotationFieldGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

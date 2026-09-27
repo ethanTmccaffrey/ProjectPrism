@@ -1,21 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-//ZigzagParallelGenerator - Kluver Category 5 (Parallel Figures)//
-
-//Scattera short zigzag strokes through a 3D volume, one per beat//
-//Each stroke is a small bundle of parallel zigzag lines (the parral-ness is the category identity)//
-//Where Fracture stabs single shards, this lays down little combed bundles of angular lines//
-
-//Acoustic > visual mapping://
-//Parallel line count: weight (dominant zigzag = thick 4-5 line bundles, minor = 2)//
-//Zigzag sharpness: roughness / ZCR (rougher music = harder V kinks)//
-//Stroke direction: a Perlin direction field, so nearby strokes align (local combed patches) while the whole field varies across the volume//
-//Colour: the track's RealtimeColour at spawn//
-
-//Growth trigger: same adaptive onset detector as Fracture/Honeycomb (Dixon 2001)//
-//Prominence sets field spread + stroke scale//
-
+//ZigzagParallelGenerator//
+//Klüver Category 5 (Parallel Figures)//
+//Emits zigzag parallel strokes fanning from the flat mouth slot, Triggered by percussiveness x rhythmic regularity x sqrt(flatness)//
 public class ZigzagParallelGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -26,20 +14,22 @@ public class ZigzagParallelGenerator : MonoBehaviour
     [SerializeField] private int maxStrokes = 1500;
 
     [Header("Stroke Shape")]
-    //Length of a stroke along its direction//
-    [SerializeField] private float strokeLength = 6f;
-    //Number of zigzag segments along each line//
+    [SerializeField] private float strokeLength = 40f;
     [SerializeField] private int zigSegments = 5;
-    //Spacing between the parallel lines in a bundle//
     [SerializeField] private float lineSpacing = 0.4f;
-    //Zigzag amplitude range (kink depth), scaled by roughness//
     [SerializeField] private float minAmplitude = 0.3f;
     [SerializeField] private float maxAmplitude = 1.6f;
     [SerializeField] private float lineWidth = 0.06f;
 
     [Header("Direction Field")]
-    //Larger = broader aligned regions (smoother combing). Smaller = more local variation//
     [SerializeField] private float directionFieldScale = 0.03f;
+
+    [Header("Mouth Arc")]
+    [SerializeField] private float arcUp = 55f; 
+    [SerializeField] private float arcDown = 8f;   
+    [SerializeField] private float arcWidth = 55f;  
+    [SerializeField] private float mouthWidth = 22f;
+    [SerializeField] private float mouthHeight = 6f;
 
     [Header("Onset Detection (Dixon 2001)")]
     [SerializeField] private int fluxHistorySize = 43;
@@ -74,9 +64,8 @@ public class ZigzagParallelGenerator : MonoBehaviour
         _active = false;
         _fieldSeed = Random.Range(0f, 1000f);
 
-        Debug.Log("PRISM ZigzagParallelGenerator: Initialised");
     }
-    public void UpdateGenerator(TimbralProfile profile) 
+    public void UpdateGenerator(TimbralProfile profile)
     {
         float weight = profile.WeightZigzagParallel;
         _active = weight >= activationThreshold;
@@ -119,50 +108,40 @@ public class ZigzagParallelGenerator : MonoBehaviour
 
     private void SpawnStroke(TimbralProfile profile, float weight, Prominence pr)
     {
-        //Scattered position in a spherical field, scaled/positioned by prominence//
-        float spread = fieldRadius * Mathf.Lerp(0.35f, 1f, pr.prominence);
-        Vector3 fieldCentre = transform.position + Random.onUnitSphere * (fieldRadius * (1f - pr.centrality));
-        Vector3 pos = fieldCentre + Random.onUnitSphere * (spread * Mathf.Pow(Random.value, 0.5f));
+        Vector3 pos, dir;
+        MouthEmission(pr, out pos, out dir);
 
-        //Direction from the Perlin field: nearby strokes align, whole field varies//
-        Vector3 dir = FieldDirection(pos);
-
-        //A perpendicular axis to lay the parallel lines along, and one to zigzag along//
         Vector3 across = Vector3.Cross(dir, Vector3.up);
         if (across.sqrMagnitude < 1e-4f) across = Vector3.Cross(dir, Vector3.right);
         across.Normalize();
-        Vector3 kick = Vector3.Cross(dir, across).normalized; //zigzag displacement axis//
+        Vector3 kick = Vector3.Cross(dir, across).normalized; 
 
-        //Parallel line count from weight (dominant = thicker bundle)//
         int lineCount = Mathf.RoundToInt(Mathf.Lerp(2f, 5f, weight));
         lineCount = Mathf.Clamp(lineCount, 2, 5);
 
-        //Zigzag sharpness (amplitude) from roughness//
         float amplitude = Mathf.Lerp(minAmplitude, maxAmplitude, profile.RealtimePercussiveRatio);
 
-        //Overall size from prominence//
-        float sizeScale = Mathf.Lerp(0.5f, 1f, pr.prominence);
-        float length = strokeLength * sizeScale;
-        float amp = amplitude * sizeScale;
+        float length = strokeLength;
+        float amp = amplitude;
+        float widthScale = Mathf.Lerp(0.6f, 1.4f, pr.prominence);
 
         Color colour = _prism != null ? _prism.RealtimeColour : Color.cyan;
 
         GameObject stroke = new GameObject("ZigStroke");
         stroke.transform.SetParent(_root.transform);
 
-        //Build each parallel line offset along 'across', all sharing the same zigzag//
         float bundleWidth = lineSpacing * (lineCount - 1);
         for (int l = 0; l < lineCount; l++)
         {
             float offset = (l * lineSpacing) - bundleWidth * 0.5f;
             Vector3 lineOrigin = pos + across * offset;
-            BuildZigLine(stroke, lineOrigin, dir, kick, length, amp, colour, sizeScale);
+            BuildZigLine(stroke, lineOrigin, dir, kick, length, amp, colour, widthScale);
         }
 
         _strokeCount++;
     }
 
-    //A single zigzag polyline as a LineRenderer//
+
     private void BuildZigLine(GameObject parent, Vector3 origin, Vector3 dir, Vector3 kick, float length, float amplitude, Color colour, float sizeScale)
     {
         int pts = zigSegments + 1;
@@ -171,7 +150,6 @@ public class ZigzagParallelGenerator : MonoBehaviour
 
         for (int i = 0; i < pts; i++)
         {
-            //Alternate the kick direction each segment for the zigzag//
             float side = (i % 2 == 0) ? -1f : 1f;
             positions[i] = origin + dir * (step * i) + kick * (amplitude * side);
         }
@@ -193,14 +171,39 @@ public class ZigzagParallelGenerator : MonoBehaviour
         lr.receiveShadows = false;
     }
 
-    //Perlin-based direction field: smoothly varying unit vectors across the volume, so nearby strokes get similar directions (local combed patches) while distant ones differ//
+    private void MouthEmission(Prominence pr, out Vector3 origin, out Vector3 dir)
+    {
+        Transform m = _prism != null ? _prism.MouthAnchor : null;
+
+        if (m == null)
+        {
+            float spread = fieldRadius * Mathf.Lerp(0.35f, 1f, pr.prominence);
+            Vector3 fieldCentre = transform.position + Random.onUnitSphere * (fieldRadius * (1f - pr.centrality));
+            origin = fieldCentre + Random.onUnitSphere * (spread * Mathf.Pow(Random.value, 0.5f));
+            dir = FieldDirection(origin);
+            return;
+        }
+
+        float n1 = Mathf.PerlinNoise(_fieldSeed + _strokeCount * 0.15f, 0f) * 2f - 1f;
+        float n2 = Mathf.PerlinNoise(0f, _fieldSeed + _strokeCount * 0.15f) * 2f - 1f;
+
+        float u = n2; 
+        float v = (Mathf.PerlinNoise(_fieldSeed + 50f + _strokeCount * 0.15f, 0f) * 2f - 1f);
+        origin = m.position + m.right * (u * mouthWidth * 0.5f) + m.up * (v * mouthHeight * 0.5f);
+
+        float up = Mathf.Lerp(-arcDown, arcUp, (n1 * 0.5f + 0.5f));
+        float side = u * arcWidth;
+
+        Quaternion rot = Quaternion.AngleAxis(side, m.up) * Quaternion.AngleAxis(-up, m.right);
+        dir = (rot * m.forward).normalized;
+    }
+
     private Vector3 FieldDirection(Vector3 p)
     {
         float nx = Mathf.PerlinNoise(_fieldSeed + p.x * directionFieldScale, p.z * directionFieldScale);
         float ny = Mathf.PerlinNoise(_fieldSeed + p.y * directionFieldScale, p.x * directionFieldScale);
         float nz = Mathf.PerlinNoise(_fieldSeed + p.z * directionFieldScale, p.y * directionFieldScale);
 
-        //Map 0-1 noise to -1..1 and normalise into a direction//
         Vector3 dir = new Vector3(nx * 2f - 1f, ny * 2f - 1f, nz * 2f - 1f);
         if (dir.sqrMagnitude < 1e-4f) dir = Vector3.forward;
         return dir.normalized;

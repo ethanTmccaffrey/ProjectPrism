@@ -1,5 +1,7 @@
-//Marching cubes lookup tables (Lorensen & Cline 1987; tables via Paul Bourke)//
-//Auto-generated - do not hand edit. 256 corner combinations each//
+//MarchingCubesTables//
+//Static marching-cubes lookup tables (256-entry edge and triangle tables). Lorensen & Cline (1987)//
+//transcription via Paul Bourke..
+//Used by HeadField to extract the head mesh from the SDF//
 
 public static class MarchingCubesTables
 {

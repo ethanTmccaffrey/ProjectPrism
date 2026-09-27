@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//DriftGenerator//
+//Klüver Category 2 (Spirals)//
+//Slow drifting spiral motion through space, Triggered by sustain x sparseness (inverse onset density) x quietness//
+
 public class DriftGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -61,7 +65,6 @@ public class DriftGenerator : MonoBehaviour
         _growing.Clear();
         _fieldSeed = Random.Range(0f, 1000f);
 
-        Debug.Log("PRISM DriftGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

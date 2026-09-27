@@ -1,6 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//ReduplicationGenerator//
+//Klüver Category 3 (Lattices / Honeycombs / Gratings)//
+//Fires repeating concurrent ranks outward from the outer skull surface along the normal driven per beat, Triggered by rhythmic regularity squared x tonality//
 public class ReduplicationGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -71,7 +74,6 @@ public class ReduplicationGenerator : MonoBehaviour
         _rankCount = 0;
         _growing.Clear();
 
-        Debug.Log("PRISM ReduplicationGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

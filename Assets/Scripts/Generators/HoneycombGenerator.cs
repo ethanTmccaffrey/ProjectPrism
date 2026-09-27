@@ -1,6 +1,10 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
 
+//HoneycombGenerator//
+//Klüver Category 3 (Lattices / Honeycombs / Gratings)//
+//Paints hexagonal honeycomb edge bands onto the outer skull, Triggered by rhythmic regularity x flatness x onset density//
+
 public class HoneycombGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -18,6 +22,7 @@ public class HoneycombGenerator : MonoBehaviour
     [SerializeField] private float paintRadius = 0.4f;
     [SerializeField] private float paintSpacing = 0.3f;
     [SerializeField, Range(0f, 1f)] private float paintStrength = 1f;
+    [SerializeField, Range(0f, 1f)] private float paintBrightness = 0.7f;
 
     [Header("Onset Detection (Dixon 2001)")]
     [SerializeField] private int fluxHistorySize = 43;
@@ -63,7 +68,6 @@ public class HoneycombGenerator : MonoBehaviour
         _seeded = false;
         _active = false;
 
-        Debug.Log("PRISM HoneycombGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)
@@ -118,7 +122,8 @@ public class HoneycombGenerator : MonoBehaviour
     {
         if (!_seeded)
         {
-            if (placement != null && placement.HasSkullMesh && placement.RandomSkullMeshPoint(out _seedPoint, out _seedNormal))
+            if (placement != null && placement.HasSkullMesh &&
+                placement.RandomSkullMeshPoint(out _seedPoint, out _seedNormal))
             {
                 _tangentX = Vector3.Cross(_seedNormal, Vector3.up);
                 if (_tangentX.sqrMagnitude < 1e-4f) _tangentX = Vector3.Cross(_seedNormal, Vector3.right);
@@ -179,9 +184,7 @@ public class HoneycombGenerator : MonoBehaviour
     private void SurfaceAt(Vector3 local, out Vector3 point, out Vector3 normal)
     {
         Vector3 approx = _seedPoint + _tangentX * local.x + _tangentY * local.y;
-        if (placement != null && placement.HasSkullMesh &&
-            placement.NearestSkullMeshPoint(approx, out point, out normal))
-            return;
+        if (placement != null && placement.HasSkullMesh && placement.NearestSkullMeshPoint(approx, out point, out normal)) return;
         point = approx;
         normal = _seedNormal;
     }
@@ -218,12 +221,11 @@ public class HoneycombGenerator : MonoBehaviour
 
     private Color ResolveColour(TimbralProfile profile)
     {
-        if (_prism != null) return _prism.RealtimeColour;
-        return Color.HSVToRGB(0.6f, 0.5f, 0.9f);
+        Color c = _prism != null ? _prism.RealtimeColour : Color.HSVToRGB(0.6f, 0.5f, 0.9f);
+        return c * paintBrightness;
     }
 
     private void OnDestroy()
     {
-        
     }
 }

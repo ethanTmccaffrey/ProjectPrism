@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+//ConcentricRingsGenerator//
+//Klüver Category 1 (Tunnels / Funnels)//
+//Emits expanding rings that follow the skull surface, Triggered by sustain x tonality x energy//
+
 public class ConcentricRingsGenerator : MonoBehaviour
 {
     [Header("Activation")]
@@ -51,7 +55,6 @@ public class ConcentricRingsGenerator : MonoBehaviour
         _emitAccumulator = 0f;
         _ringCount = 0;
 
-        Debug.Log("PRISM ConcentricRingsGenerator: Initialised");
     }
 
     public void UpdateGenerator(TimbralProfile profile)

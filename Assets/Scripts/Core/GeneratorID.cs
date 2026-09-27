@@ -1,9 +1,8 @@
 using UnityEngine;
 
-//GeneratorId — stable identifier for each of the 20 generators//
-//Order matches the weight declarations in TimbralProfile and the TimbralProfile.Weights array, so a GeneratorId can index directly into that array//
-//Keep the two in lockstep: if a generator is added or reordered, update both here and the array fill//
-//Used by the prominence coordinator (PRISMGenerator) to rank generators against each other and by generators to identify themselves when asking for their prominence//
+//GeneratorID//
+//Enum identifying the 18 generators, ordered by Klüver form-constant category//
+//Count is last for array sizing, Order must match the weight array in TimbralProfile//
 public enum GeneratorID
 {
     //Ctegory 1: Tunnels and Funnels//
@@ -29,16 +28,14 @@ public enum GeneratorID
     //Category 5: Parallel figures//
     ZigzagParallel,
     WavyParallel,
-    Hatching,
 
     //Category 6: Wavy Lines and Amorphous Forms//
     FluidTendril,
-    AmorphousSpeck,
     BilateralDuplication,
 
     //Category 7: Small Circular forms//
     SpeckCluster,
     OrganicCluster,
 
-    Count //Always last, gives the total (20) for array sizing//
+    Count //Always last, gives the total (18) for array sizing//
 }

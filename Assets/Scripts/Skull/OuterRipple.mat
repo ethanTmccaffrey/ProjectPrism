@@ -115,10 +115,12 @@ Material:
     - _GlossyReflections: 0
     - _Metallic: 0
     - _OcclusionStrength: 1
+    - _PaintEmissive: 8
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _RippleAmplitude: 5
+    - _RippleTintStrength: 0.85
     - _RippleWavelength: 0.7
     - _Smoothness: 0.5
     - _SmoothnessTextureChannel: 0
